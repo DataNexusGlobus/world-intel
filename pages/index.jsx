@@ -292,12 +292,12 @@ function fbIntel(t){
         {type:"political",level:"medium",title:"India: Coalition government budget negotiations ongoing",detail:"Modi-led NDA managing coalition arithmetic. Fiscal consolidation path credible; deficit target 4.5% of GDP for FY26."},
         {type:"economic",level:"high",title:"Food inflation pressuring RBI rate path",detail:"Vegetable and pulses prices elevated. RBI holding at 6.50%; rate cuts delayed to H2 2025. Core inflation under control at 3.8%."},
         {type:"military",level:"medium",title:"LAC border infrastructure build-up continues",detail:"India accelerating border road and airstrip construction. China mirror-building on Tibetan plateau. Standoff resolved at patrol points but underlying tension persists."},
-        {type:"cyber",level:"high",title:"State-sponsored cyber attacks on critical infrastructure",detail:"CERT-In reporting increased APT activity targeting power grid and BFSI sector. China and Pakistan-linked groups identified. Government issuing advisories."}
+        {type:"cyber",level:"high",title:"State-sponsored cyber attacks on critical infrastructure",detail:"CERT-In reporting increased APT activity targeting power grid and BFSI sector. China and Pakistan-linked groups identified."}
       ],
-      activeConflicts:["LAC border standoff with China — diplomatic talks ongoing","Kashmir insurgency at multi-year low but cross-border infiltration attempts continue"],
+      activeConflicts:["LAC border standoff with China — diplomatic talks ongoing","Kashmir insurgency at multi-year low but cross-border infiltration continues"],
       economicPressures:["Food inflation above RBI comfort zone delaying rate cuts","Rupee depreciation pressure on oil import bill","Global IT spending slowdown risk for services exports"],
       cyberThreats:["APT41 (China) targeting defence PSUs and research labs","Pakistan-linked groups targeting BFSI and government portals","UPI and digital payments infrastructure under probing attacks"],
-      diplomaticAlerts:["India-China Wuhan-style summit being explored after LAC disengagement","Quad naval exercises signalling Indo-Pacific alignment","India-Canada diplomatic relations strained over Khalistan issue"]},
+      diplomaticAlerts:["India-China summit being explored after LAC disengagement","Quad naval exercises signalling Indo-Pacific alignment","India-Canada diplomatic relations strained over Khalistan issue"]},
     usa:{threatLevel:"moderate",stabilityIndex:65,
       summary:"United States navigating elevated domestic political polarisation ahead of 2026 midterms. Geopolitically active on multiple fronts — Ukraine, Middle East, and Indo-Pacific. Federal institutions under strain but functioning. Economy resilient despite high rates.",
       alerts:[
@@ -311,7 +311,7 @@ function fbIntel(t){
       cyberThreats:["Salt Typhoon (China) telecom network infiltration","Volt Typhoon pre-positioning in US critical infrastructure","Russian ransomware groups targeting healthcare and energy"],
       diplomaticAlerts:["US-China high-level dialogue resumed but tech/trade tensions persist","NATO unity on Ukraine tested by budget pressures","US-Israel relations strained over Gaza civilian casualties"]},
     china:{threatLevel:"elevated",stabilityIndex:55,
-      summary:"China managing complex internal and external pressures. Property sector crisis weighing on growth and local government finances. Taiwan Strait tensions elevated with PLA exercises. US-China tech decoupling accelerating. Xi consolidating control; no near-term political instability expected.",
+      summary:"China managing complex internal and external pressures. Property sector crisis weighing on growth and local government finances. Taiwan Strait tensions elevated with PLA exercises. US-China tech decoupling accelerating.",
       alerts:[
         {type:"economic",level:"critical",title:"China: Property sector crisis spreading to local government debt",detail:"LGFV debt at ¥65 trillion. Evergrande liquidation ordered. Central government stimulus floor at 4.5% growth. Consumer confidence fragile."},
         {type:"military",level:"high",title:"PLA exercises around Taiwan at elevated frequency",detail:"PLA Air Force incursions into Taiwan ADIZ at record levels. Naval exercises simulating blockade scenarios. US carrier presence in response."},
@@ -320,84 +320,83 @@ function fbIntel(t){
       ],
       activeConflicts:["Taiwan Strait tensions — PLA exercises escalating in frequency","South China Sea: China asserting control over Philippine EEZ","China-India LAC standoff — partial disengagement achieved"],
       economicPressures:["Property sector ¥65T debt overhang deflating household wealth","Youth unemployment above 14% — social stability risk","Export competitiveness under pressure from tariffs and friend-shoring"],
-      cyberThreats:["MSS and PLA cyber units active globally","AI-powered disinformation campaigns targeting Taiwan elections","Supply chain compromise via Chinese tech hardware"],
-      diplomaticAlerts:["China-Russia 'no limits' partnership deepening","China-EU relations strained over EV tariffs and trade deficit","China mediating Middle East — Saudi-Iran normalisation follow-through"]},
+      cyberThreats:["MSS and PLA cyber units active globally","AI-powered disinformation campaigns targeting Taiwan","Supply chain compromise via Chinese tech hardware"],
+      diplomaticAlerts:["China-Russia partnership deepening","China-EU relations strained over EV tariffs","China mediating Middle East — Saudi-Iran normalisation"]},
     russia:{threatLevel:"high",stabilityIndex:38,
-      summary:"Russia under severe economic and military strain from Ukraine war. Western sanctions biting but Chinese and Indian trade partially offsetting. Putin's political position internally secure. Military conducting large-scale operations in Ukraine with high attrition rates. Nuclear signalling elevated.",
+      summary:"Russia under severe economic and military strain from Ukraine war. Western sanctions biting but Chinese and Indian trade partially offsetting. Putin's political position internally secure. Military conducting large-scale operations in Ukraine with high attrition rates.",
       alerts:[
-        {type:"military",level:"critical",title:"Russia-Ukraine war: Frontline activity intense across 1,000km",detail:"Russian forces grinding advances in Donetsk. Ukrainian drone strikes reaching deep into Russian territory. Both sides suffering high casualties. No negotiation in sight."},
-        {type:"political",level:"high",title:"Putin re-elected; hardline war cabinet in place",detail:"Election result not in doubt. Siluanov managing sanctions-hit economy. War economy consuming 35% of federal budget. Opposition eliminated."},
-        {type:"economic",level:"high",title:"Sanctions impact accelerating — ruble under pressure",detail:"Ruble trading at 90+ to USD. Inflation 7.8%. Interest rate at 16%. Oil revenues diverted to military. Consumer goods shortages in provinces."},
-        {type:"cyber",level:"critical",title:"Russian cyber attacks on NATO infrastructure escalating",detail:"GRU and SVR targeting European energy grids, railways and government networks. Estonia, Poland and Baltic states primary targets. Hybrid warfare intensifying."}
+        {type:"military",level:"critical",title:"Russia-Ukraine war: Frontline activity intense across 1,000km",detail:"Russian forces grinding advances in Donetsk. Ukrainian drone strikes reaching deep into Russian territory. Both sides suffering high casualties."},
+        {type:"political",level:"high",title:"Putin re-elected; hardline war cabinet in place",detail:"Election result not in doubt. War economy consuming 35% of federal budget. Opposition eliminated."},
+        {type:"economic",level:"high",title:"Sanctions impact accelerating — ruble under pressure",detail:"Ruble trading at 90+ to USD. Inflation 7.8%. Interest rate at 16%. Oil revenues diverted to military."},
+        {type:"cyber",level:"critical",title:"Russian cyber attacks on NATO infrastructure escalating",detail:"GRU and SVR targeting European energy grids, railways and government networks. Hybrid warfare intensifying."}
       ],
       activeConflicts:["Russia-Ukraine full-scale war — 3rd year, no ceasefire","Russia hybrid warfare against NATO Baltic and Nordic states","Wagner/Africa Corps operations in Mali, Niger, Libya, Sudan"],
-      economicPressures:["Western sanctions limiting technology and component imports","War economy crowding out civilian investment","Brain drain — 700,000+ educated Russians emigrated since 2022"],
-      cyberThreats:["GRU Sandworm targeting European critical infrastructure","SVR cozy bear intelligence collection on NATO governments","Russian disinformation factories targeting European elections"],
-      diplomaticAlerts:["Russia-North Korea military cooperation deepening — DPRK artillery supply","Russia-Iran drone supply chain established","Russia-China trade at record ¥240B — sanctions circumvention"]},
+      economicPressures:["Western sanctions limiting technology imports","War economy crowding out civilian investment","Brain drain — 700,000+ educated Russians emigrated since 2022"],
+      cyberThreats:["GRU Sandworm targeting European critical infrastructure","SVR intelligence collection on NATO governments","Russian disinformation targeting European elections"],
+      diplomaticAlerts:["Russia-North Korea military cooperation deepening","Russia-Iran drone supply chain established","Russia-China trade at record — sanctions circumvention"]},
     uk:{threatLevel:"low",stabilityIndex:74,
-      summary:"UK under new Labour government pursuing fiscal stability and international re-engagement. Economy recovering slowly from cost-of-living crisis. Northern Ireland political situation stabilised post-Windsor Framework. No significant security threats domestically.",
+      summary:"UK under new Labour government pursuing fiscal stability and international re-engagement. Economy recovering slowly from cost-of-living crisis. Northern Ireland political situation stabilised post-Windsor Framework.",
       alerts:[
-        {type:"political",level:"medium",title:"UK: Labour government managing fiscal inheritance",detail:"Reeves reviewing spending plans; NHS and public services underfunding severe. Growth agenda central but headroom limited. Reform of planning laws underway."},
-        {type:"economic",level:"medium",title:"BoE holding rates — services inflation sticky at 5%",detail:"CPI at 3.8%. BoE cautious on cuts. Mortgage market stressed — 1.5M households refinancing at higher rates in 2025. Pound stable."},
-        {type:"military",level:"medium",title:"UK increasing defence spending to 2.5% GDP",detail:"Commitment to Ukraine military aid continuing. RAF and Royal Navy contributing to Baltic air policing and Atlantic deterrence patrols."},
-        {type:"cyber",level:"medium",title:"NCSC warning on Russian and Chinese cyber threats",detail:"Critical national infrastructure — energy, water, finance — facing sustained probing. GCHQ NCSC issuing sector-specific advisories."}
+        {type:"political",level:"medium",title:"UK: Labour government managing fiscal inheritance",detail:"Reeves reviewing spending plans; NHS and public services underfunding severe. Growth agenda central but headroom limited."},
+        {type:"economic",level:"medium",title:"BoE holding rates — services inflation sticky at 5%",detail:"CPI at 3.8%. BoE cautious on cuts. Mortgage market stressed — 1.5M households refinancing at higher rates in 2025."},
+        {type:"military",level:"medium",title:"UK increasing defence spending to 2.5% GDP",detail:"Commitment to Ukraine military aid continuing. RAF and Royal Navy contributing to Baltic air policing."},
+        {type:"cyber",level:"medium",title:"NCSC warning on Russian and Chinese cyber threats",detail:"Critical national infrastructure facing sustained probing. GCHQ NCSC issuing sector-specific advisories."}
       ],
       activeConflicts:["UK military support to Ukraine — Storm Shadow missiles and training","UK Red Sea naval operations countering Houthi attacks"],
-      economicPressures:["Mortgage payment shock for 1.5M households refinancing","NHS crisis limiting workforce participation — 2.8M economically inactive","Post-Brexit trade friction adding costs to UK manufacturers"],
-      cyberThreats:["Russian GRU targeting UK political institutions","Chinese MSS economic espionage on UK tech and pharma","Ransomware targeting NHS trusts — major disruptions in 2024"],
-      diplomaticAlerts:["UK-EU reset under Labour — defence and security pact being negotiated","UK-US special relationship reaffirmed under new US administration","UK hosting Ukraine Recovery Conference — £3B commitment"]},
+      economicPressures:["Mortgage payment shock for 1.5M households refinancing","NHS crisis limiting workforce participation","Post-Brexit trade friction adding costs to UK manufacturers"],
+      cyberThreats:["Russian GRU targeting UK political institutions","Chinese MSS economic espionage on UK tech and pharma","Ransomware targeting NHS trusts"],
+      diplomaticAlerts:["UK-EU reset under Labour — defence pact being negotiated","UK-US special relationship reaffirmed","UK hosting Ukraine Recovery Conference"]},
     "middle east":{threatLevel:"high",stabilityIndex:35,
-      summary:"Middle East in multi-front crisis. Gaza conflict entering second year with no resolution. Houthi Red Sea attacks disrupting global shipping. Iran nuclear programme advancing. Regional powers hedging between US and China alignments. Oil supply stable but geopolitical premium elevated.",
+      summary:"Middle East in multi-front crisis. Gaza conflict entering second year with no resolution. Houthi Red Sea attacks disrupting global shipping. Iran nuclear programme advancing. Oil supply stable but geopolitical premium elevated.",
       alerts:[
-        {type:"military",level:"critical",title:"Gaza conflict — humanitarian crisis and regional spillover risk",detail:"IDF operations ongoing. Death toll exceeding 35,000. Hezbollah-Israel exchanges on Lebanon border. Iran-backed proxies activated across Iraq, Syria, Yemen."},
-        {type:"military",level:"high",title:"Houthi Red Sea attacks — shipping disruption ongoing",detail:"100+ merchant ships attacked. Suez Canal traffic down 40%. US/UK strikes on Yemen limited in effect. Insurance premiums surging. Energy tankers rerouting via Cape."},
-        {type:"political",level:"high",title:"Iran nuclear programme — IAEA verification suspended",detail:"Iran enriching to 60% U-235. Breakout time estimated at weeks. P5+1 negotiations stalled. Israeli strike risk elevated. US sanctions reimposed."},
-        {type:"economic",level:"medium",title:"Oil price geopolitical premium — Brent above $85",detail:"OPEC+ maintaining production cuts. Geopolitical risk premium $5-8/barrel. Saudi Arabia defending $85 price floor. UAE and Iraq exceeding quotas."}
+        {type:"military",level:"critical",title:"Gaza conflict — humanitarian crisis and regional spillover risk",detail:"IDF operations ongoing. Death toll exceeding 35,000. Hezbollah-Israel exchanges on Lebanon border. Iran-backed proxies activated."},
+        {type:"military",level:"high",title:"Houthi Red Sea attacks — shipping disruption ongoing",detail:"100+ merchant ships attacked. Suez Canal traffic down 40%. Insurance premiums surging. Energy tankers rerouting via Cape."},
+        {type:"political",level:"high",title:"Iran nuclear programme — IAEA verification suspended",detail:"Iran enriching to 60% U-235. Breakout time estimated at weeks. P5+1 negotiations stalled. Israeli strike risk elevated."},
+        {type:"economic",level:"medium",title:"Oil price geopolitical premium — Brent above $85",detail:"OPEC+ maintaining production cuts. Geopolitical risk premium $5-8/barrel. Saudi Arabia defending $85 price floor."}
       ],
-      activeConflicts:["Israel-Hamas war — Gaza operations ongoing into year 2","Houthi attacks on Red Sea shipping — US/UK strikes limited impact","Israel-Hezbollah exchanges — northern Israel evacuation ongoing","Yemen civil war — Houthi consolidation in north"],
+      activeConflicts:["Israel-Hamas war — Gaza operations ongoing into year 2","Houthi attacks on Red Sea shipping","Israel-Hezbollah exchanges — northern Israel evacuation ongoing","Yemen civil war — Houthi consolidation in north"],
       economicPressures:["Red Sea shipping disruption adding 2-3 weeks to Asia-Europe transit","Oil price volatility on Iran escalation risk","Tourism and FDI to Egypt and Jordan severely impacted"],
       cyberThreats:["Iran IRGC Cyber targeting Israeli and US financial infrastructure","Hamas-linked groups social media disinformation","Saudi Aramco and UAE energy infrastructure under sustained probing"],
-      diplomaticAlerts:["Saudi-Israel normalisation on hold pending Gaza resolution","China brokered Saudi-Iran deal — implementation progressing slowly","Qatar mediating Gaza ceasefire — talks repeatedly breaking down"]},
+      diplomaticAlerts:["Saudi-Israel normalisation on hold pending Gaza resolution","China brokered Saudi-Iran deal progressing slowly","Qatar mediating Gaza ceasefire — talks repeatedly breaking down"]},
     europe:{threatLevel:"moderate",stabilityIndex:62,
-      summary:"Europe managing multiple simultaneous crises — Ukraine war on its eastern flank, energy transition costs, political fragmentation with far-right gains in France, Germany and Netherlands. ECB beginning rate cut cycle. NATO unity holding but tested by US policy uncertainty.",
+      summary:"Europe managing multiple simultaneous crises — Ukraine war on its eastern flank, energy transition costs, political fragmentation with far-right gains in France, Germany and Netherlands. ECB beginning rate cut cycle.",
       alerts:[
-        {type:"military",level:"high",title:"Europe increasing defence spending — NATO 2% target achieved",detail:"Germany, Poland, Baltic states exceeding NATO 2% target. European defence industry ramping production. Ukraine support continuing but fatigue growing in some states."},
-        {type:"political",level:"high",title:"Far-right parties gaining in European elections",detail:"AfD in Germany, RN in France, PVV in Netherlands forming governments or leading polls. EU cohesion under pressure. Hungary blocking Ukraine aid repeatedly."},
-        {type:"economic",level:"medium",title:"ECB cutting rates — Eurozone growth below 1%",detail:"ECB delivered first cut. Germany in recession. France fiscal deficit above 3%. Southern Europe outperforming. Energy costs still elevated vs pre-2022."},
-        {type:"cyber",level:"high",title:"Russian hybrid warfare targeting European infrastructure",detail:"Estonian, Polish, Finnish infrastructure under sustained Russian cyber attack. Undersea cable sabotage incidents in Baltic. Election interference campaigns active."}
+        {type:"military",level:"high",title:"Europe increasing defence spending — NATO 2% target achieved",detail:"Germany, Poland, Baltic states exceeding NATO 2% target. European defence industry ramping production."},
+        {type:"political",level:"high",title:"Far-right parties gaining in European elections",detail:"AfD in Germany, RN in France, PVV in Netherlands forming governments or leading polls. EU cohesion under pressure."},
+        {type:"economic",level:"medium",title:"ECB cutting rates — Eurozone growth below 1%",detail:"ECB delivered first cut. Germany in recession. France fiscal deficit above 3%. Energy costs still elevated."},
+        {type:"cyber",level:"high",title:"Russian hybrid warfare targeting European infrastructure",detail:"Estonian, Polish, Finnish infrastructure under sustained Russian cyber attack. Undersea cable sabotage incidents in Baltic."}
       ],
-      activeConflicts:["Ukraine-Russia war on EU's eastern border — direct security threat","Kosovo-Serbia tensions — EU-mediated dialogue stalling"],
-      economicPressures:["Energy prices still 60% above pre-Ukraine war levels","German industrial competitiveness crisis — energy and labour costs","ECB rate cuts lagging Fed — euro area credit conditions tight"],
-      cyberThreats:["Russian GRU targeting Baltic and Nordic critical infrastructure","Chinese MSS economic espionage on European tech champions","Election interference via social media disinformation campaigns"],
-      diplomaticAlerts:["EU-Ukraine accession negotiations opened — multi-year process","EU-China EV tariff dispute escalating","NATO Article 5 commitments tested by hybrid attack ambiguity"]},
+      activeConflicts:["Ukraine-Russia war on EU's eastern border","Kosovo-Serbia tensions — EU-mediated dialogue stalling"],
+      economicPressures:["Energy prices still 60% above pre-Ukraine war levels","German industrial competitiveness crisis","ECB rate cuts lagging Fed — credit conditions tight"],
+      cyberThreats:["Russian GRU targeting Baltic and Nordic critical infrastructure","Chinese MSS economic espionage on European tech","Election interference via social media disinformation"],
+      diplomaticAlerts:["EU-Ukraine accession negotiations opened","EU-China EV tariff dispute escalating","NATO Article 5 commitments tested by hybrid attack ambiguity"]},
     "south asia":{threatLevel:"elevated",stabilityIndex:44,
-      summary:"South Asia facing overlapping crises. Pakistan's political and economic instability. Bangladesh post-revolution transition fragile. Sri Lanka still recovering from 2022 collapse. India-China border situation partially stabilised. Afghanistan under Taliban — humanitarian catastrophe deepening.",
+      summary:"South Asia facing overlapping crises. Pakistan's political and economic instability. Bangladesh post-revolution transition fragile. Sri Lanka still recovering from 2022 collapse.",
       alerts:[
-        {type:"political",level:"critical",title:"Pakistan: Military-political crisis deepening",detail:"Imran Khan imprisoned; PTI suppressed but retains popular support. Military-civilian hybrid governance unstable. Supreme Court independence under pressure. Elections disputed."},
-        {type:"economic",level:"critical",title:"Pakistan: IMF programme on knife-edge — FX reserves at $8B",detail:"Pakistan reliant on IMF $3B SBA. Inflation at 20%+. Power sector circular debt ₨2.6T. Debt service consuming 60% of revenues. Default risk non-trivial."},
-        {type:"military",level:"high",title:"India-Pakistan: Cross-border terrorism incidents rising",detail:"TTP attacks from Afghan soil increasing in KP and Balochistan. India-Pakistan LOC exchanges at elevated frequency. Nuclear deterrence stable but miscalculation risk elevated."},
-        {type:"political",level:"high",title:"Bangladesh: Post-Hasina transition — interim government fragile",detail:"Sheikh Hasina fled to India. Muhammad Yunus leading interim government. Garment sector — 80% of exports — stable but political uncertainty delaying FDI."}
+        {type:"political",level:"critical",title:"Pakistan: Military-political crisis deepening",detail:"Imran Khan imprisoned; PTI suppressed but retains popular support. Military-civilian hybrid governance unstable."},
+        {type:"economic",level:"critical",title:"Pakistan: IMF programme on knife-edge — FX reserves at $8B",detail:"Pakistan reliant on IMF $3B SBA. Inflation at 20%+. Debt service consuming 60% of revenues. Default risk non-trivial."},
+        {type:"military",level:"high",title:"India-Pakistan: Cross-border terrorism incidents rising",detail:"TTP attacks from Afghan soil increasing in KP and Balochistan. India-Pakistan LOC exchanges at elevated frequency."},
+        {type:"political",level:"high",title:"Bangladesh: Post-Hasina transition — interim government fragile",detail:"Sheikh Hasina fled to India. Muhammad Yunus leading interim government. Garment sector stable but political uncertainty delaying FDI."}
       ],
       activeConflicts:["Pakistan TTP insurgency in KP — 1,000+ security personnel killed in 2024","India-China LAC standoff — partial patrol normalisation","Afghanistan Taliban — resistance pockets in Panjshir and north"],
       economicPressures:["Pakistan sovereign debt crisis — IMF-dependent","Bangladesh political transition risk to garment export sector","Sri Lanka debt restructuring — China and India creditor negotiations"],
-      cyberThreats:["Pakistan ISI-linked APT targeting Indian defence and government","Bangladesh financial sector hacking — Bangladesh Bank precedent","State-sponsored disinformation targeting Indian election narrative"],
+      cyberThreats:["Pakistan ISI-linked APT targeting Indian defence","Bangladesh financial sector hacking","State-sponsored disinformation targeting Indian elections"],
       diplomaticAlerts:["India-Pakistan — no formal dialogue; back-channel via UAE","India-Bangladesh relations — Hasina exile creating tension","China deepening CPEC investment in Pakistan — $62B committed"]},
   };
-  const key=Object.keys(ID).find(k=>cl.includes(k))||"global";
-  if(ID[key])return ID[key];
-  // Global fallback with dynamic country name
+  const key=Object.keys(ID).find(k=>cl.includes(k));
+  if(key&&ID[key])return ID[key];
   return{threatLevel:"moderate",stabilityIndex:60,
-    summary:`${tg} geopolitical situation monitored across multiple risk dimensions. Intelligence assessment based on latest available open-source signals. Situation fluid — recommend monitoring key indicators below.`,
+    summary:`${tg} geopolitical situation monitored across multiple risk dimensions. Intelligence assessment based on latest available open-source signals. Situation fluid.`,
     alerts:[
       {type:"political",level:"high",title:`${tg}: Political risk elevated`,detail:"Governance uncertainty affecting policy continuity. Opposition activity and institutional pressures creating near-term risk premium."},
-      {type:"economic",level:"high",title:`${tg}: Macro headwinds building`,detail:"Inflation above central bank target. Rate environment tightening credit conditions. External debt servicing costs rising on stronger dollar."},
+      {type:"economic",level:"high",title:`${tg}: Macro headwinds building`,detail:"Inflation above central bank target. Rate environment tightening credit conditions. External debt servicing costs rising."},
       {type:"cyber",level:"medium",title:`${tg}: Critical infrastructure under probing attacks`,detail:"State-linked and criminal cyber actors targeting energy, finance and telecoms. CERT issuing elevated threat advisories."},
-      {type:"military",level:"medium",title:`${tg}: Regional security posture elevated`,detail:"Military readiness above baseline. Neighbour state tensions requiring active diplomatic management. No imminent kinetic escalation assessed."}
+      {type:"military",level:"medium",title:`${tg}: Regional security posture elevated`,detail:"Military readiness above baseline. Neighbour state tensions requiring active diplomatic management."}
     ],
     activeConflicts:[`${tg} regional border disputes requiring active management`,"Non-state armed group activity in border areas"],
-    economicPressures:["Currency depreciation pressure on import costs","Sovereign debt refinancing risk in high-rate environment","Export competitiveness under pressure from global slowdown"],
+    economicPressures:["Currency depreciation pressure on import costs","Sovereign debt refinancing risk","Export competitiveness under pressure from global slowdown"],
     cyberThreats:["APT groups targeting financial sector infrastructure","Ransomware attacks on government and healthcare systems","Supply chain compromise risk from foreign technology vendors"],
-    diplomaticAlerts:[`${tg} navigating great power competition pressures`,"Regional multilateral framework participation under review","Bilateral trade disputes requiring WTO-level resolution"]};
+    diplomaticAlerts:[`${tg} navigating great power competition pressures`,"Regional multilateral framework under review","Bilateral trade disputes requiring WTO-level resolution"]};
 }
 function fbForecast(t){
   const tg=t||"USA";
@@ -647,7 +646,7 @@ const LIGHT = {
 
 /* ─ CSS ─ */
 function makeCSS(T,isDark){return `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&family=Orbitron:wght@700;900&display=swap&font-display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased;}
 html,body,#root,#__next{height:100%;background:${T.bg};}
 body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1.6;}
@@ -717,6 +716,13 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
     gap:6px!important;
     overflow:hidden!important;
     box-sizing:border-box!important;
+    position:relative!important;
+  }
+  #header-logo{
+    position:absolute!important;
+    left:50%!important;
+    transform:translateX(-50%)!important;
+    pointer-events:none;
   }
   main{width:100%;overflow-x:hidden;}
   footer{padding:0 12px!important;}
@@ -1571,16 +1577,25 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
       <div style={{height:"100vh",background:T.bg,display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
         {/* TOP NAV */}
-        <header style={{height:56,background:T.headerBg,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 16px",gap:8,flexShrink:0,backdropFilter:"blur(14px)",zIndex:100,boxShadow:`0 1px 12px ${T.shadow}`,overflow:"hidden",maxWidth:"100vw",boxSizing:"border-box"}}>
+        <header style={{height:56,background:T.headerBg,borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 12px",gap:8,flexShrink:0,backdropFilter:"blur(14px)",zIndex:100,boxShadow:`0 1px 12px ${T.shadow}`,maxWidth:"100vw",boxSizing:"border-box",position:"relative"}}>
 
           {/* Mobile hamburger — CSS shows only on mobile */}
           <button id="mob-menu-btn" onClick={()=>setSidebarOpen(o=>!o)}
-            style={{display:"none",background:"none",border:`1px solid ${T.border}`,borderRadius:6,
-              padding:"5px 7px",cursor:"pointer",color:T.textD,fontSize:17,flexShrink:0,lineHeight:1}}
-            aria-label="Menu">☰</button>
+            style={{display:"none",background:"linear-gradient(135deg,#ff6a00,#ff8c00)",
+              border:"2.5px solid #f5c400",borderRadius:10,
+              padding:"8px 10px",cursor:"pointer",flexShrink:0,lineHeight:1,
+              boxShadow:"0 0 18px rgba(255,140,0,0.8), 0 2px 8px rgba(0,0,0,0.5)",
+              zIndex:2,position:"relative"}}
+            aria-label="Menu">
+            <div style={{display:"flex",flexDirection:"column",gap:"5px",alignItems:"center",justifyContent:"center",width:20}}>
+              <span style={{display:"block",width:20,height:3,background:"#f5c400",borderRadius:2,boxShadow:"0 0 6px #f5c400"}}/>
+              <span style={{display:"block",width:20,height:3,background:"#f5c400",borderRadius:2,boxShadow:"0 0 6px #f5c400"}}/>
+              <span style={{display:"block",width:20,height:3,background:"#f5c400",borderRadius:2,boxShadow:"0 0 6px #f5c400"}}/>
+            </div>
+          </button>
 
           {/* Logo */}
-          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0}}>
+          <div id="header-logo" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0,position:"absolute",left:"50%",transform:"translateX(-50%)"}}>
             <LogoSVG size={32}/>
             <div style={{minWidth:0}}>
               <div style={{fontFamily:"'Orbitron',monospace",fontSize:11,fontWeight:900,color:T.cyan,
@@ -1721,11 +1736,12 @@ export default function App(){
   if(session===undefined||cookie===undefined){
     return(
       <><Head>
-        <title>World Intel — AI Financial &amp; Geo-Intelligence</title>
-        <meta name="description" content="AI-powered financial markets, geopolitical intelligence and forecasts."/>
+        <title>World Intel — AI Financial & Geo-Intelligence</title>
+        <meta name="description" content="AI-powered financial markets, stock picks, geopolitical intelligence and economic forecasts for every country."/>
         <meta name="viewport" content="width=device-width, initial-scale=1"/>
         <link rel="preconnect" href="https://fonts.googleapis.com"/>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous"/>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><circle cx='24' cy='24' r='19' fill='%23001433'/><circle cx='24' cy='24' r='19' stroke='%231a8cff' stroke-width='1.6' fill='none'/><text x='24' y='30' text-anchor='middle' font-size='15' font-weight='900' fill='%23f5c400' font-family='Arial'>%24</text></svg>"/>
       </Head>
       <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
         <style>{CSS}</style>
@@ -1734,17 +1750,19 @@ export default function App(){
           <div style={{fontFamily:"'Orbitron',monospace",fontSize:18,fontWeight:900,background:`linear-gradient(135deg,${T.cyan},${T.purple})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:".1em",marginTop:12,marginBottom:16}}>WORLD INTEL</div>
           <Loader c={T.cyan} sz={7}/>
         </div>
-      </div></>
+      </div>
+      </>
     );
   }
 
   return(
     <><Head>
-        <title>World Intel — AI Financial &amp; Geo-Intelligence</title>
-        <meta name="description" content="AI-powered financial markets, geopolitical intelligence and forecasts."/>
+        <title>World Intel — AI Financial & Geo-Intelligence</title>
+        <meta name="description" content="AI-powered financial markets, stock picks, geopolitical intelligence and economic forecasts for every country."/>
         <meta name="viewport" content="width=device-width, initial-scale=1"/>
         <link rel="preconnect" href="https://fonts.googleapis.com"/>
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous"/>
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><circle cx='24' cy='24' r='19' fill='%23001433'/><circle cx='24' cy='24' r='19' stroke='%231a8cff' stroke-width='1.6' fill='none'/><text x='24' y='30' text-anchor='middle' font-size='15' font-weight='900' fill='%23f5c400' font-family='Arial'>%24</text></svg>"/>
       </Head>
       {session
         ?<Dashboard session={session} onLogout={handleLogout} T={T} isDarkMode={darkMode} onToggleTheme={toggleTheme}/>

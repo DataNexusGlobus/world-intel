@@ -1581,16 +1581,16 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
 
           {/* Mobile hamburger — CSS shows only on mobile */}
           <button id="mob-menu-btn" onClick={()=>setSidebarOpen(o=>!o)}
-            style={{display:"none",background:"linear-gradient(135deg,#ff6a00,#ff8c00)",
-              border:"2.5px solid #f5c400",borderRadius:10,
+            style={{display:"none",background:"transparent",
+              border:"2px solid #f5c400",borderRadius:8,
               padding:"8px 10px",cursor:"pointer",flexShrink:0,lineHeight:1,
-              boxShadow:"0 0 18px rgba(255,140,0,0.8), 0 2px 8px rgba(0,0,0,0.5)",
+              boxShadow:"0 0 8px rgba(245,196,0,0.5)",
               zIndex:2,position:"relative"}}
             aria-label="Menu">
             <div style={{display:"flex",flexDirection:"column",gap:"5px",alignItems:"center",justifyContent:"center",width:20}}>
-              <span style={{display:"block",width:20,height:3,background:"#f5c400",borderRadius:2,boxShadow:"0 0 6px #f5c400"}}/>
-              <span style={{display:"block",width:20,height:3,background:"#f5c400",borderRadius:2,boxShadow:"0 0 6px #f5c400"}}/>
-              <span style={{display:"block",width:20,height:3,background:"#f5c400",borderRadius:2,boxShadow:"0 0 6px #f5c400"}}/>
+              <span style={{display:"block",width:20,height:2.5,background:"#f5c400",borderRadius:2,boxShadow:"0 0 4px #f5c400"}}/>
+              <span style={{display:"block",width:20,height:2.5,background:"#f5c400",borderRadius:2,boxShadow:"0 0 4px #f5c400"}}/>
+              <span style={{display:"block",width:20,height:2.5,background:"#f5c400",borderRadius:2,boxShadow:"0 0 4px #f5c400"}}/>
             </div>
           </button>
 

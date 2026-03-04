@@ -644,15 +644,17 @@ Use REAL well-known companies from ${target}. Examples:
 Pick 5 REAL companies from ${target} with varied signals (mix of BUY/HOLD/SELL), realistic prices in ${cur}, varied sectors.
 Make data realistic and country-appropriate. Vary the numbers — not all should be up or all the same.
 
-Return a JSON array of exactly 5 objects. Each object:
+Return a JSON object with a single key "stocks" containing an array of exactly 5 objects. Each object:
 {"rank":1,"symbol":"REAL_TICKER","name":"Real Company Name","sector":"sector","price":"${cur}XXX.XX",
 "change1d":"+X.XX%","change1d_raw":X.XX,"change1w":"+X.XX%","change1w_raw":X.XX,"change1m":"+X.XX%","change1m_raw":X.XX,
 "volume":"XX.XM","marketCap":"${cur}X.XT","pe":"XX.X","signal":"BUY",
 "signalStrength":75,"shortTerm":"BULLISH","longTerm":"BULLISH",
 "targetPrice":"${cur}XXX","upside":"+XX%","riskLevel":"LOW",
 "whyNow":"specific reason for ${target}","catalyst":"specific catalyst","trend":"up"}`,
-    "[",2800);
-  const arr=pArr(raw);
+    "{",2800);
+  const obj=pObj(raw);
+  // Extract stocks array from wrapper object
+  const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
   if(arr&&arr.length>=3&&arr[0].symbol&&!/^LDR\d$/.test(arr[0].symbol)){
     arr._isLive=true; return arr;
   }
@@ -690,9 +692,9 @@ picks: array of 5 objects each with:
   thesis (2 sentences, country-specific reasoning),
   tradingSetup (1 sentence),catalysts (array of 2 strings),risks (array of 2 strings),
   newsDriver (1 sentence),confidence (50-90),timeframe`,
-    "{",4000);
+    "{",3000);
   const obj=pObj(raw);
-  if(obj&&obj.picks&&obj.picks.length>=3&&obj.picks[0].symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
+  if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=3&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
     obj._isLive=true; return obj;
   }
   const fb=fbPicks(target); fb._isLive=false; return fb;
@@ -1424,7 +1426,7 @@ function PageStockPicks({country,setCountry,T}){
         </div>
       </div>
       <div style={{padding:"18px 26px"}}>
-        <AsyncBlock key={target} loadFn={useCallback(()=>fetchStockPicks(target),[target])} color={T.pink} skCount={5} successCheck={d=>d?.picks?.length>0} T={T}>
+        <AsyncBlock key={target} loadFn={useCallback(()=>fetchStockPicks(target),[target])} color={T.pink} skCount={5} successCheck={d=>d?.picks?.filter(p=>p&&p.symbol).length>0} T={T}>
           {data=>(
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
               {/* Market overview */}
@@ -1441,7 +1443,7 @@ function PageStockPicks({country,setCountry,T}){
 
               {/* Picks */}
               <div style={{fontSize:13,color:T.pink,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".08em",fontWeight:700,marginBottom:2}}>🎯 TOP 5 AI INVESTMENT PICKS</div>
-              {(data.picks||[]).map((p,i)=>{
+              {(data.picks||[]).filter(p=>p&&p.symbol&&p.rank).map((p,i)=>{
                 const sigC=p.signal?.includes("BUY")?T.green:p.signal?.includes("SELL")?T.red:T.yellow;
                 return(
                   <div key={i} className="card-hover" style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:13,padding:"18px 20px",animation:`countUp ${.2+i*.1}s ease`}}>

@@ -603,13 +603,16 @@ function pObj(raw){const r=_extractJSON(raw,"{","}");return r&&typeof r==="objec
 
 /* ── DATA FETCHERS ── */
 async function fetchNews(q){
+  const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
-`Search for the 8 most impactful breaking news stories happening RIGHT NOW about: "${q}".
+`Generate 8 realistic and highly relevant breaking news stories for "${q}" as of ${today}.
+Make them specific, credible, and varied across politics, economy, military, trade, and technology.
+Use real organizations, leaders, companies, and current geopolitical context for ${q}.
 Return ONLY a JSON array of 8 objects. Each object has exactly these keys:
 title, source, country, severity (critical|high|medium|low),
 category (conflict|military|cyber|economy|politics|trade|unrest|infrastructure|disaster),
 ago, impact, people, tradeEffect.
-ONLY the JSON array. No text before or after.`,2500);
+ONLY the JSON array. No markdown, no text before or after.`,2500);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
     arr._isLive=true; return arr;

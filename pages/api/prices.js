@@ -38,8 +38,8 @@ export default async function handler(req, res) {
         // Finnhub returns: c=current, h=high, l=low, o=open, pc=prev close, dp=change%
         if (data && data.c && data.c > 0) {
           results[symbol] = {
-            price: data.c,           // current price
-            change1d_raw: data.dp || 0,  // % change today
+            price: data.c,
+            change1d_raw: data.dp || 0,
             high: data.h,
             low: data.l,
             prevClose: data.pc,

@@ -107,6 +107,37 @@ function _apiUrl(){
   return"/api/claude";
 }
 
+/* fetchRealPrices — enriches Groq stock data with real prices from Finnhub
+   Gracefully degrades: if Finnhub unavailable, Groq prices are kept */
+async function fetchRealPrices(stocks){
+  try{
+    const symbols=stocks.map(s=>s.symbol).filter(Boolean);
+    const res=await fetch("/api/prices",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({symbols})});
+    if(!res.ok)return stocks;
+    const{prices}=await res.json();
+    if(!prices||Object.keys(prices).length===0)return stocks;
+    // Merge real prices into stocks — keep all Groq analysis fields
+    return stocks.map(s=>{
+      const p=prices[s.symbol];
+      if(!p||!p.isReal)return s;
+      // Format price with original currency prefix
+      const cur=s.price?s.price.replace(/[\d.,]+.*/,"").trim():"";
+      const formatted=cur+(p.price.toFixed(2));
+      const ch=p.change1d_raw||0;
+      return{...s,
+        price:formatted,
+        change1d:ch>=0?`+${ch.toFixed(2)}%`:`${ch.toFixed(2)}%`,
+        change1d_raw:ch,
+        _priceReal:true,
+      };
+    });
+  }catch{
+    return stocks; // silent fallback — Groq prices used
+  }
+}
+
 /* callClaude — web search enabled via Gemini grounding, returns raw text (for news) */
 async function callClaude(prompt,maxTokens=2500,retries=3){
   const ck=_ck("ws:"+prompt);
@@ -625,8 +656,10 @@ async function fetchMarkets(country){
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`You are a financial data provider. Generate realistic stock market data for ${target}'s ${ex} exchange (${exIdx}) as of ${today}.
-Use REAL well-known companies from ${target}. Examples:
+`You are a financial data provider with knowledge up to early 2025. Generate realistic stock market data for ${target}'s ${ex} exchange (${exIdx}) as of ${today}.
+Use REAL well-known companies from ${target} with the most recent prices from your training data.
+Important: Use your most up-to-date knowledge for stock prices. For example USA stocks: AAPL ~$220-230, MSFT ~$410-420, NVDA ~$130-140, AMZN ~$220-230, META ~$580-600.
+Examples for other markets:
 - India: Reliance Industries (RELIANCE.NS), TCS (TCS.NS), HDFC Bank (HDFCBANK.NS), Infosys (INFY.NS), ITC (ITC.NS)
 - USA: Apple (AAPL), Microsoft (MSFT), Nvidia (NVDA), Amazon (AMZN), Meta (META)
 - UK: HSBC (HSBA.L), Shell (SHEL.L), Unilever (ULVR.L), AstraZeneca (AZN.L), BP (BP.L)
@@ -655,8 +688,17 @@ Return a JSON object with a single key "stocks" containing an array of exactly 5
   const obj=pObj(raw);
   // Extract stocks array from wrapper object
   const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
-  if(arr&&arr.length>=3&&arr[0].symbol&&!/^LDR\d$/.test(arr[0].symbol)){
-    arr._isLive=true; return arr;
+  if(arr&&arr.length>=3&&arr[0]?.symbol&&!/^LDR\d$/.test(arr[0].symbol)){
+    // Normalize — Groq sometimes returns numbers as strings or vice versa
+    const norm=arr.map(s=>({...s,
+      change1d_raw:parseFloat(s.change1d_raw)||0,
+      change1w_raw:parseFloat(s.change1w_raw)||0,
+      change1m_raw:parseFloat(s.change1m_raw)||0,
+      signalStrength:parseInt(s.signalStrength)||70,
+    }));
+    // Enrich with real Finnhub prices — gracefully degrades if unavailable
+    const enriched=await fetchRealPrices(norm);
+    enriched._isLive=true; return enriched;
   }
   const fb=fbMarkets(target); fb._isLive=false; return fb;
 }
@@ -695,6 +737,28 @@ picks: array of 5 objects each with:
     "{",3000);
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=3&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
+    // Normalize all pick fields to prevent render crashes
+    obj.picks=obj.picks.filter(p=>p&&p.symbol&&p.rank).map(p=>({...p,
+      rsi:parseInt(p.rsi)||55,
+      confidence:parseInt(p.confidence)||70,
+      signal:(p.signal||"HOLD").toUpperCase(),
+      upside1m:p.upside1m!=null?String(p.upside1m):"",
+      upside6m:p.upside6m!=null?String(p.upside6m):"",
+      upside1y:p.upside1y!=null?String(p.upside1y):"",
+      catalysts:Array.isArray(p.catalysts)?p.catalysts:[],
+      risks:Array.isArray(p.risks)?p.risks:[],
+    }));
+    obj.marketSentiment=(obj.marketSentiment||"neutral").toLowerCase();
+    obj.sentimentScore=parseInt(obj.sentimentScore)||60;
+    obj.fearGreedIndex=parseInt(obj.fearGreedIndex)||50;
+    // Enrich picks with real prices — map currentPrice field
+    const pickStocks=obj.picks.map(p=>({symbol:p.symbol,price:p.currentPrice||""}));
+    const enriched=await fetchRealPrices(pickStocks);
+    enriched.forEach(ep=>{
+      if(!ep._priceReal)return;
+      const pick=obj.picks.find(p=>p.symbol===ep.symbol);
+      if(pick){pick.currentPrice=ep.price;pick.change1d=ep.change1d;pick._priceReal=true;}
+    });
     obj._isLive=true; return obj;
   }
   const fb=fbPicks(target); fb._isLive=false; return fb;
@@ -719,7 +783,13 @@ cyberThreats (array of 3 strings relevant to ${t}),
 diplomaticAlerts (array of 3 strings about ${t} diplomatic situation)`,
     "{",2600);
   const obj=pObj(raw);
-  if(obj&&obj.alerts&&obj.alerts.length>0){obj._isLive=true;return obj;}
+  if(obj&&obj.alerts&&obj.alerts.length>0){
+    // Normalize fields — Groq sometimes returns uppercase or string numbers
+    obj.threatLevel=(obj.threatLevel||"moderate").toLowerCase();
+    obj.stabilityIndex=parseInt(obj.stabilityIndex)||60;
+    obj.alerts=(obj.alerts||[]).map(a=>({...a,level:(a.level||"low").toLowerCase(),type:(a.type||"political").toLowerCase()}));
+    obj._isLive=true;return obj;
+  }
   const fb=fbIntel(t);fb._isLive=false;return fb;
 }
 
@@ -1468,13 +1538,15 @@ function PageStockPicks({country,setCountry,T}){
 
                     {/* Price targets */}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginBottom:13}}>
-                      {[["Current",p.currentPrice,T.text,null],["1M Target",p.targetPrice1m,T.green,p.upside1m],["6M Target",p.targetPrice6m,T.cyan,p.upside6m],["1Y Target",p.targetPrice1y,T.purple,p.upside1y]].map(([l,v,c,u])=>(
+                      {[["Current",p.currentPrice,T.text,null],["1M Target",p.targetPrice1m,T.green,p.upside1m],["6M Target",p.targetPrice6m,T.cyan,p.upside6m],["1Y Target",p.targetPrice1y,T.purple,p.upside1y]].map(([l,v,c,u])=>{
+                        const us=u!=null?String(u):"";
+                        return(
                         <div key={l} style={{background:`${isDark?"rgba(0,0,0,.2)":"rgba(0,0,0,.04)"}`,borderRadius:8,padding:"10px 11px",textAlign:"center"}}>
                           <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>{l}</div>
                           <div style={{fontSize:14,fontWeight:700,color:c,fontFamily:"'JetBrains Mono',monospace"}}>{v||"—"}</div>
-                          {u&&<div style={{fontSize:11,color:u.startsWith("+")?T.green:T.red,marginTop:2,fontFamily:"'JetBrains Mono',monospace"}}>{u}</div>}
+                          {us&&<div style={{fontSize:11,color:us.startsWith("+")||us.startsWith("+")?T.green:us.startsWith("-")?T.red:T.green,marginTop:2,fontFamily:"'JetBrains Mono',monospace"}}>{us}</div>}
                         </div>
-                      ))}
+                      );})}
                     </div>
 
                     {/* Technical indicators */}

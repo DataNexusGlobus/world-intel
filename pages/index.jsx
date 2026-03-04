@@ -122,12 +122,21 @@ async function fetchRealPrices(stocks){
     return stocks.map(s=>{
       const p=prices[s.symbol];
       if(!p||!p.isReal)return s;
+      // Sanity check: extract Groq's estimated price number for comparison
+      const groqPriceNum=parseFloat((s.price||s.currentPrice||"0").replace(/[^0-9.]/g,""));
+      // If Finnhub price is wildly different (>5x or <0.2x of Groq estimate), skip it
+      // This catches stale/wrong data for non-US exchanges
+      if(groqPriceNum>0){
+        const ratio=p.price/groqPriceNum;
+        if(ratio>5||ratio<0.2)return s; // Finnhub data unreliable for this exchange
+      }
       // Format price with original currency prefix
-      const cur=s.price?s.price.replace(/[\d.,]+.*/,"").trim():"";
+      const cur=(s.price||s.currentPrice||"").replace(/[\d.,]+.*/,"").trim();
       const formatted=cur+(p.price.toFixed(2));
       const ch=p.change1d_raw||0;
       return{...s,
         price:formatted,
+        currentPrice:formatted,
         change1d:ch>=0?`+${ch.toFixed(2)}%`:`${ch.toFixed(2)}%`,
         change1d_raw:ch,
         _priceReal:true,
@@ -138,17 +147,17 @@ async function fetchRealPrices(stocks){
   }
 }
 
-/* callClaude — web search enabled via Gemini grounding, returns raw text (for news) */
-async function callClaude(prompt,maxTokens=2500,retries=3){
+/* callClaude — returns raw text (for news) */
+async function callClaude(prompt,maxTokens=1800,retries=3){
   const ck=_ck("ws:"+prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
-    if(i>0)await new Promise(r=>setTimeout(r,3000*i));
+    if(i>0)await new Promise(r=>setTimeout(r,i===1?20000:40000)); // 20s, 40s for rate limit reset
     try{
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens,useSearch:true})});
+        body:JSON.stringify({prompt,maxTokens,useSearch:false,jsonMode:false})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
-      const d=await res.json();if(d.error){if(i<retries-1)continue;return "";}
+      const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
     }catch{if(i<retries-1)continue;return "";}
@@ -156,17 +165,17 @@ async function callClaude(prompt,maxTokens=2500,retries=3){
   return "";
 }
 
-/* callClaudeJSON — JSON mode via Gemini responseMimeType, returns pure JSON string */
-async function callClaudeJSON(prompt,prefill="{",maxTokens=3000,retries=3){
+/* callClaudeJSON — JSON mode, returns pure JSON string */
+async function callClaudeJSON(prompt,prefill="{",maxTokens=2000,retries=3){
   const ck=_ck("j:"+prefill+":"+prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
-    if(i>0)await new Promise(r=>setTimeout(r,3000*i));
+    if(i>0)await new Promise(r=>setTimeout(r,i===1?20000:40000)); // 20s, 40s for rate limit reset
     try{
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompt,maxTokens,useSearch:false,jsonMode:true,prefill})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
-      const d=await res.json();if(d.error){if(i<retries-1)continue;return "";}
+      const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
     }catch{if(i<retries-1)continue;return "";}
@@ -636,14 +645,9 @@ function pObj(raw){const r=_extractJSON(raw,"{","}");return r&&typeof r==="objec
 async function fetchNews(q){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
-`Generate 8 realistic and highly relevant breaking news stories for "${q}" as of ${today}.
-Make them specific, credible, and varied across politics, economy, military, trade, and technology.
-Use real organizations, leaders, companies, and current geopolitical context for ${q}.
-Return ONLY a JSON array of 8 objects. Each object has exactly these keys:
-title, source, country, severity (critical|high|medium|low),
-category (conflict|military|cyber|economy|politics|trade|unrest|infrastructure|disaster),
-ago, impact, people, tradeEffect.
-ONLY the JSON array. No markdown, no text before or after.`,2500);
+`Generate 8 breaking news stories for "${q}" as of ${today}. Use real leaders, companies, events.
+Return ONLY a JSON array of 8 objects with keys: title, source, country, severity (critical|high|medium|low), category (conflict|military|cyber|economy|politics|trade|unrest|infrastructure|disaster), ago, impact, people, tradeEffect.
+No markdown, no text outside the array.`,1800);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
     arr._isLive=true; return arr;
@@ -656,35 +660,11 @@ async function fetchMarkets(country){
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`You are a financial data provider with knowledge up to early 2025. Generate realistic stock market data for ${target}'s ${ex} exchange (${exIdx}) as of ${today}.
-Use REAL well-known companies from ${target} with the most recent prices from your training data.
-Important: Use your most up-to-date knowledge for stock prices. For example USA stocks: AAPL ~$220-230, MSFT ~$410-420, NVDA ~$130-140, AMZN ~$220-230, META ~$580-600.
-Examples for other markets:
-- India: Reliance Industries (RELIANCE.NS), TCS (TCS.NS), HDFC Bank (HDFCBANK.NS), Infosys (INFY.NS), ITC (ITC.NS)
-- USA: Apple (AAPL), Microsoft (MSFT), Nvidia (NVDA), Amazon (AMZN), Meta (META)
-- UK: HSBC (HSBA.L), Shell (SHEL.L), Unilever (ULVR.L), AstraZeneca (AZN.L), BP (BP.L)
-- China: Alibaba (9988.HK), Tencent (0700.HK), BYD (002594.SZ), Ping An (601318.SS), ICBC (601398.SS)
-- Japan: Toyota (7203.T), Sony (6758.T), SoftBank (9984.T), Nintendo (7974.T), Keyence (6861.T)
-- Germany: SAP (SAP.DE), Siemens (SIE.DE), Allianz (ALV.DE), BASF (BAS.DE), BMW (BMW.DE)
-- Korea: Samsung Electronics (005930.KS), SK Hynix (000660.KS), LG Chem (051910.KS), Hyundai (005380.KS), Kakao (035720.KS)
-- Australia: BHP (BHP.AX), CBA (CBA.AX), ANZ (ANZ.AX), CSL (CSL.AX), Wesfarmers (WES.AX)
-- Brazil: Petrobras (PETR4.SA), Vale (VALE3.SA), Itaú (ITUB4.SA), Bradesco (BBDC4.SA), Embraer (EMBR3.SA)
-- UAE: Emaar Properties (EMAAR.DU), FAB (FAB.AD), DP World (DPW.DU), Etisalat (ETISALAT.AD), ADNOC (ADNOCDIST.AD)
-- Canada: Shopify (SHOP.TO), Royal Bank (RY.TO), TD Bank (TD.TO), Barrick Gold (ABX.TO), CNR (CNR.TO)
-- France: LVMH (MC.PA), TotalEnergies (TTE.PA), Sanofi (SAN.PA), BNP Paribas (BNP.PA), Airbus (AIR.PA)
-- Saudi: Saudi Aramco (2222.SR), STC (7010.SR), Al Rajhi Bank (1120.SR), SABIC (2010.SR), NCB (1180.SR)
-
-Pick 5 REAL companies from ${target} with varied signals (mix of BUY/HOLD/SELL), realistic prices in ${cur}, varied sectors.
-Make data realistic and country-appropriate. Vary the numbers — not all should be up or all the same.
-
-Return a JSON object with a single key "stocks" containing an array of exactly 5 objects. Each object:
-{"rank":1,"symbol":"REAL_TICKER","name":"Real Company Name","sector":"sector","price":"${cur}XXX.XX",
-"change1d":"+X.XX%","change1d_raw":X.XX,"change1w":"+X.XX%","change1w_raw":X.XX,"change1m":"+X.XX%","change1m_raw":X.XX,
-"volume":"XX.XM","marketCap":"${cur}X.XT","pe":"XX.X","signal":"BUY",
-"signalStrength":75,"shortTerm":"BULLISH","longTerm":"BULLISH",
-"targetPrice":"${cur}XXX","upside":"+XX%","riskLevel":"LOW",
-"whyNow":"specific reason for ${target}","catalyst":"specific catalyst","trend":"up"}`,
-    "{",2800);
+`Generate stock market data for ${target}'s ${ex} (${exIdx}) as of ${today}.
+Use 5 real well-known ${target} companies with accurate recent prices in ${cur}.
+Return JSON: {"stocks":[{"rank":1,"symbol":"TICKER","name":"Name","sector":"sector","price":"${cur}XXX","change1d":"+X.XX%","change1d_raw":X.XX,"change1w":"+X.XX%","change1w_raw":X.XX,"change1m":"+X.XX%","change1m_raw":X.XX,"volume":"XX.XM","marketCap":"${cur}X.XT","pe":"XX.X","signal":"BUY","signalStrength":75,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}XXX","upside":"+XX%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"}]}
+Mix signals: some BUY, HOLD, SELL. Use real current prices from your latest knowledge.`,
+    "{",1800);
   const obj=pObj(raw);
   // Extract stocks array from wrapper object
   const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
@@ -708,33 +688,10 @@ async function fetchStockPicks(country){
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Generate a detailed stock investment analysis for ${target}'s ${ex} (${exIdx}) as of ${today}.
-Use REAL well-known companies from ${target}'s market. Pick 5 stocks with genuine investment thesis.
-For India use: RELIANCE, TCS, HDFCBANK, INFY, ITC, WIPRO, BHARTIARTL, BAJFINANCE, ASIANPAINT, MARUTI
-For USA use: AAPL, MSFT, NVDA, AMZN, META, GOOGL, JPM, TSLA, BRK-B, UNH
-For UK use: HSBA.L, SHEL.L, AZN.L, ULVR.L, BP.L
-For China use: 9988.HK, 0700.HK, 002594.SZ, 601318.SS, 600519.SS
-For Japan use: 7203.T, 6758.T, 9984.T, 7974.T, 6861.T
-For Germany use: SAP.DE, SIE.DE, ALV.DE, BAS.DE, BMW.DE
-Adapt to the correct country based on "${target}".
-
-Return a single JSON object with these exact keys:
-exchange, index, marketSentiment (bullish|neutral|bearish), sentimentScore (0-100),
-fearGreedIndex (0-100), indexChange1d (like "+0.85%"), indexChange1w (like "+2.3%"),
-marketOutlook (2-3 sentences about ${target} market specifically),
-macroFactors (array of 3 strings specific to ${target}),
-keyDrivers (array of 2 strings), sectorRotation (object: leading and lagging arrays),
-picks: array of 5 objects each with:
-  rank,symbol,name,sector,currentPrice (${cur}),targetPrice1m (${cur}),targetPrice6m (${cur}),targetPrice1y (${cur}),
-  upside1m,upside6m,upside1y,signal (STRONG BUY|BUY|HOLD|SELL|STRONG SELL),
-  tradingSignal,investmentSignal,rsi (30-75),maSignal,volumeTrend (INCREASING|STABLE|DECREASING),
-  supportLevel (${cur}),resistanceLevel (${cur}),stopLoss (${cur}),riskReward (1:X.X),
-  volatility (LOW|MEDIUM|HIGH),beta (0.5-1.8),pe,epsGrowth,revenueGrowth,debtEquity,
-  dividendYield,institutionalOwnership,
-  thesis (2 sentences, country-specific reasoning),
-  tradingSetup (1 sentence),catalysts (array of 2 strings),risks (array of 2 strings),
-  newsDriver (1 sentence),confidence (50-90),timeframe`,
-    "{",3000);
+`Stock investment analysis for ${target}'s ${ex} (${exIdx}) as of ${today}. Use 5 real ${target} stocks.
+Return JSON object:
+{"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish|neutral|bearish","sentimentScore":65,"fearGreedIndex":55,"indexChange1d":"+0.5%","indexChange1w":"+1.2%","marketOutlook":"2 sentences","macroFactors":["f1","f2","f3"],"keyDrivers":["d1","d2"],"sectorRotation":{"leading":["s1","s2"],"lagging":["s1","s2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"Name","sector":"sector","currentPrice":"${cur}XXX","targetPrice1m":"${cur}XXX","targetPrice6m":"${cur}XXX","targetPrice1y":"${cur}XXX","upside1m":"+10%","upside6m":"+20%","upside1y":"+30%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":55,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}XXX","resistanceLevel":"${cur}XXX","stopLoss":"${cur}XXX","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"22","epsGrowth":"+15%","revenueGrowth":"+12%","debtEquity":"0.3","dividendYield":"1.5%","institutionalOwnership":"70%","thesis":"2 sentence thesis","tradingSetup":"1 sentence setup","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence","confidence":75,"timeframe":"Q2 2025"}]}`,
+    "{",2000);
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=3&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
     // Normalize all pick fields to prevent render crashes
@@ -768,20 +725,10 @@ async function fetchIntel(country){
   const t=(country&&country.trim())||"Global";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Generate a current geopolitical intelligence briefing for ${t} as of ${today}.
-Be specific to ${t} — use real political leaders, real economic data, real regional tensions.
-Do NOT generate generic global data. Everything must be specific to ${t}.
-
-Return a single JSON object with exactly these keys:
-threatLevel (elevated|high|moderate|low),
-stabilityIndex (0-100),
-summary (2-3 sentences specifically about ${t} current situation),
-alerts (array of exactly 4 objects: type (political|economic|cyber|military), level (critical|high|medium|low), title, detail — all specific to ${t}),
-activeConflicts (array of 2-3 strings specific to ${t} region),
-economicPressures (array of 3 strings specific to ${t} economy),
-cyberThreats (array of 3 strings relevant to ${t}),
-diplomaticAlerts (array of 3 strings about ${t} diplomatic situation)`,
-    "{",2600);
+`Intel briefing for ${t} as of ${today}. Be specific to ${t} — real leaders, events, tensions.
+Return JSON: {"threatLevel":"moderate","stabilityIndex":65,"summary":"2-3 sentences about ${t}","alerts":[{"type":"political","level":"medium","title":"title","detail":"detail"}],"activeConflicts":["c1","c2"],"economicPressures":["e1","e2","e3"],"cyberThreats":["t1","t2","t3"],"diplomaticAlerts":["d1","d2","d3"]}
+Include exactly 4 alerts. threatLevel: elevated|high|moderate|low. alert level: critical|high|medium|low.`,
+    "{",1800);
   const obj=pObj(raw);
   if(obj&&obj.alerts&&obj.alerts.length>0){
     // Normalize fields — Groq sometimes returns uppercase or string numbers
@@ -797,30 +744,9 @@ async function fetchForecast(country){
   const t=(country&&country.trim())||"USA";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Generate a detailed economic forecast for ${t} as of ${today}.
-Use real macroeconomic knowledge specific to ${t} — actual GDP figures, central bank rates, inflation trends.
-Be specific: India has RBI, USA has Fed, UK has BoE, EU has ECB, Japan has BoJ, etc.
-Use realistic current figures for ${t}, not generic placeholders.
-
-Return a single JSON object with exactly these keys:
-country (must be "${t}"),
-stability (0-100 political stability),
-geopoliticalScore (0-100),
-confidenceScore (0-100),
-economicOutlook (positive|neutral|negative|critical),
-gdpGrowth (like "+6.4%" for India or "+2.8%" for USA — use realistic values for ${t}),
-inflation (realistic % for ${t}),
-unemployment (realistic % for ${t}),
-interestRate (current central bank rate for ${t}),
-currencyStrength (STRONG|STABLE|WEAK|VOLATILE),
-sixMonthPrediction (3-4 sentences specifically about ${t} economic outlook),
-workingClassForecast (2-3 sentences about jobs, wages, cost of living in ${t}),
-marketOutlook (2 sentences on ${t} equity markets),
-traderOpportunities (2-3 sentences: specific sectors and opportunities in ${t}),
-keyRisks (array of 3 specific risks for ${t}),
-opportunities (array of 3 specific opportunities in ${t}),
-basedOn (sources like "RBI MPC, IMF Article IV, MOSPI data" — use correct institutions for ${t})`,
-    "{",2600);
+`Economic forecast for ${t} as of ${today}. Use real figures: GDP, inflation, central bank rate, unemployment.
+Return JSON: {"country":"${t}","stability":70,"geopoliticalScore":65,"confidenceScore":72,"economicOutlook":"positive|neutral|negative|critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STABLE","sixMonthPrediction":"3-4 sentences","workingClassForecast":"2-3 sentences","marketOutlook":"2 sentences","traderOpportunities":"2-3 sentences","keyRisks":["r1","r2","r3"],"opportunities":["o1","o2","o3"],"basedOn":"institutions"}`,
+    "{",1800);
   const obj=pObj(raw);
   if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true;return obj;}
   const fb=fbForecast(t);fb._isLive=false;return fb;

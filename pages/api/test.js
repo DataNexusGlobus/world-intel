@@ -1,58 +1,47 @@
-// pages/api/test.js — TEMPORARY, delete after confirming Groq works
+// pages/api/test.js — TEMPORARY, delete after confirming everything works
 // Visit: https://world-intel-gamma.vercel.app/api/test
 
 export default async function handler(req, res) {
-  const apiKey = process.env.GROQ_API_KEY;
+  const groqKey = process.env.GROQ_API_KEY;
+  const finnhubKey = process.env.FINNHUB_API_KEY;
+  const results = {};
 
-  if (!apiKey) {
-    return res.status(200).json({
-      step: "FAIL — GROQ_API_KEY not set in Vercel",
-      fix: "Vercel → Settings → Environment Variables → add GROQ_API_KEY"
-    });
-  }
-
-  const keyPreview = apiKey.substring(0, 8) + "..." + apiKey.slice(-4);
-
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: "Say hello in one word" }],
-        max_tokens: 10,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      return res.status(200).json({
-        step: "FAIL — Groq rejected the request",
-        httpStatus: response.status,
-        keyUsed: keyPreview,
-        groqError: data?.error?.message,
-        fullResponse: data,
+  // Test Groq
+  if (!groqKey) {
+    results.groq = { status: "FAIL", error: "GROQ_API_KEY not set in Vercel" };
+  } else {
+    try {
+      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
+        body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "user", content: "Say hello in one word" }], max_tokens: 5 }),
       });
+      const d = await r.json();
+      results.groq = r.ok
+        ? { status: "SUCCESS ✅", response: d?.choices?.[0]?.message?.content }
+        : { status: "FAIL ❌", error: d?.error?.message };
+    } catch (e) {
+      results.groq = { status: "FAIL ❌", error: e.message };
     }
-
-    const text = data?.choices?.[0]?.message?.content || "";
-
-    return res.status(200).json({
-      step: "SUCCESS — Groq is working!",
-      keyUsed: keyPreview,
-      groqResponse: text,
-      message: "Live data will now work on your website."
-    });
-
-  } catch (err) {
-    return res.status(200).json({
-      step: "FAIL — network error",
-      keyUsed: keyPreview,
-      error: err.message,
-    });
   }
+
+  // Test Finnhub — fetch AAPL price
+  if (!finnhubKey) {
+    results.finnhub = { status: "FAIL — FINNHUB_API_KEY not set in Vercel", fix: "Add FINNHUB_API_KEY to Vercel Environment Variables" };
+  } else {
+    try {
+      const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${finnhubKey}`);
+      const d = await r.json();
+      results.finnhub = r.ok && d.c > 0
+        ? { status: "SUCCESS ✅", AAPL_price: `$${d.c}`, change: `${d.dp?.toFixed(2)}%` }
+        : { status: "FAIL ❌", error: "Invalid response", data: d };
+    } catch (e) {
+      results.finnhub = { status: "FAIL ❌", error: e.message };
+    }
+  }
+
+  return res.status(200).json({
+    summary: `Groq: ${results.groq?.status} | Finnhub: ${results.finnhub?.status}`,
+    ...results,
+  });
 }

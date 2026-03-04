@@ -102,16 +102,12 @@ function _ck(p){return p.slice(0,120);}
 function _cg(k){const e=_MC.get(k);if(!e)return null;if(Date.now()-e.t>300000){_MC.delete(k);return null;}return e.v;}
 function _cs(k,v){_MC.set(k,v);if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
 
-/* Get API endpoint — proxy on Vercel, direct on claude.ai */
+/* Get API endpoint — always use our proxy */
 function _apiUrl(){
-  try{
-    const h=window.location.hostname;
-    if(!h.includes("claude.ai")&&!h.includes("localhost"))return"/api/claude";
-  }catch{}
-  return"https://api.anthropic.com/v1/messages";
+  return"/api/claude";
 }
 
-/* callClaude — web_search enabled, returns raw text (for news) */
+/* callClaude — web search enabled via Gemini grounding, returns raw text (for news) */
 async function callClaude(prompt,maxTokens=2500,retries=3){
   const ck=_ck("ws:"+prompt);
   const h=_cg(ck);if(h)return h;
@@ -119,23 +115,17 @@ async function callClaude(prompt,maxTokens=2500,retries=3){
     if(i>0)await new Promise(r=>setTimeout(r,3000*i));
     try{
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:maxTokens,
-          tools:[{type:"web_search_20250305",name:"web_search"}],
-          messages:[{role:"user",content:prompt}]})});
+        body:JSON.stringify({prompt,maxTokens,useSearch:true})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error){if(i<retries-1)continue;return "";}
-      const t=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("\n");
+      const t=d.text||"";
       if(t){_cs(ck,t);return t;}
     }catch{if(i<retries-1)continue;return "";}
   }
   return "";
 }
 
-/* callClaudeJSON — ASSISTANT PREFILL TRICK
-   Forces model to start output with "{" or "[" so output is PURE JSON.
-   NO tools (prefill not compatible with tool_use requests).
-   Guarantees clean parseable JSON every single time.
-*/
+/* callClaudeJSON — JSON mode via Gemini responseMimeType, returns pure JSON string */
 async function callClaudeJSON(prompt,prefill="{",maxTokens=3000,retries=3){
   const ck=_ck("j:"+prefill+":"+prompt);
   const h=_cg(ck);if(h)return h;
@@ -143,16 +133,11 @@ async function callClaudeJSON(prompt,prefill="{",maxTokens=3000,retries=3){
     if(i>0)await new Promise(r=>setTimeout(r,3000*i));
     try{
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:maxTokens,
-          messages:[
-            {role:"user",content:prompt},
-            {role:"assistant",content:prefill}   /* ← PREFILL: forces JSON start */
-          ]})});
+        body:JSON.stringify({prompt,maxTokens,useSearch:false,jsonMode:true,prefill})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error){if(i<retries-1)continue;return "";}
-      /* Response continues from prefill — prepend it back */
-      const t=(d.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-      if(t){const full=prefill+t;_cs(ck,full);return full;}
+      const t=d.text||"";
+      if(t){_cs(ck,t);return t;}
     }catch{if(i<retries-1)continue;return "";}
   }
   return "";
@@ -626,8 +611,10 @@ category (conflict|military|cyber|economy|politics|trade|unrest|infrastructure|d
 ago, impact, people, tradeEffect.
 ONLY the JSON array. No text before or after.`,2500);
   const arr=pArr(raw);
-  if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10)return arr;
-  return fbNews(q);
+  if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
+    arr._isLive=true; return arr;
+  }
+  const fb=fbNews(q); fb._isLive=false; return fb;
 }
 
 async function fetchMarkets(country){
@@ -663,8 +650,10 @@ Return a JSON array of exactly 5 objects. Each object:
 "whyNow":"specific reason for ${target}","catalyst":"specific catalyst","trend":"up"}`,
     "[",2800);
   const arr=pArr(raw);
-  if(arr&&arr.length>=3&&arr[0].symbol&&!/^LDR\d$/.test(arr[0].symbol))return arr;
-  return fbMarkets(target);
+  if(arr&&arr.length>=3&&arr[0].symbol&&!/^LDR\d$/.test(arr[0].symbol)){
+    arr._isLive=true; return arr;
+  }
+  const fb=fbMarkets(target); fb._isLive=false; return fb;
 }
 
 async function fetchStockPicks(country){
@@ -700,8 +689,10 @@ picks: array of 5 objects each with:
   newsDriver (1 sentence),confidence (50-90),timeframe`,
     "{",4000);
   const obj=pObj(raw);
-  if(obj&&obj.picks&&obj.picks.length>=3&&obj.picks[0].symbol&&!/^PK\d$/.test(obj.picks[0].symbol))return obj;
-  return fbPicks(target);
+  if(obj&&obj.picks&&obj.picks.length>=3&&obj.picks[0].symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
+    obj._isLive=true; return obj;
+  }
+  const fb=fbPicks(target); fb._isLive=false; return fb;
 }
 
 async function fetchIntel(country){
@@ -723,8 +714,8 @@ cyberThreats (array of 3 strings relevant to ${t}),
 diplomaticAlerts (array of 3 strings about ${t} diplomatic situation)`,
     "{",2600);
   const obj=pObj(raw);
-  if(obj&&obj.alerts&&obj.alerts.length>0)return obj;
-  return fbIntel(t);
+  if(obj&&obj.alerts&&obj.alerts.length>0){obj._isLive=true;return obj;}
+  const fb=fbIntel(t);fb._isLive=false;return fb;
 }
 
 async function fetchForecast(country){
@@ -756,8 +747,8 @@ opportunities (array of 3 specific opportunities in ${t}),
 basedOn (sources like "RBI MPC, IMF Article IV, MOSPI data" — use correct institutions for ${t})`,
     "{",2600);
   const obj=pObj(raw);
-  if(obj&&obj.country&&obj.gdpGrowth)return obj;
-  return fbForecast(t);
+  if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true;return obj;}
+  const fb=fbForecast(t);fb._isLive=false;return fb;
 }
 
 /* ── TERMS ── */
@@ -976,10 +967,9 @@ function AsyncBlock({loadFn,color,skCount=4,successCheck,children,T}){
       const d=await loadFn();
       if(!mounted.current)return;
       if(d&&(successCheck?successCheck(d):true)){
-        // Detect if data looks live (real tickers) vs fallback (LDR1, PK1 placeholders)
-        const txt=JSON.stringify(d);
-        const looksLive=!/"LDR[1-5]"|"PK[1-5]"|"Tech Leader"|"Growth Pick"|"Value Pick"/.test(txt);
-        setIsLive(looksLive);
+        // Use explicit _isLive flag set by each fetch function
+        // true = came from Claude API, false = hardcoded fallback
+        setIsLive(d._isLive===true);
         setData(d);setFail(false);
       }else{setFail(true);setErrMsg("No data returned. The AI may have had difficulty finding current market data.");}
     }catch(e){

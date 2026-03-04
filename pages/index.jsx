@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Head from 'next/head';
+import { createClient } from '@supabase/supabase-js';
 
 /* ═══════════════════════════════════════════════════════════
    DataNexus Globus
@@ -7,8 +8,15 @@ import Head from 'next/head';
    Owner: Shubham Chatterjee | datanexusglobus@gmail.com
 ═══════════════════════════════════════════════════════════ */
 
-/* ── STORAGE ── */
-const KS="wi:sess_v9", KC="wi:cookie_v9", KU="wi:users_v9", KTH="wi:theme_v9";
+/* ── SUPABASE CLIENT ── */
+const _SB_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const _SB_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const supabase = (typeof window !== 'undefined' && _SB_URL && _SB_KEY)
+  ? createClient(_SB_URL, _SB_KEY)
+  : null;
+
+/* ── LOCAL STORAGE (cookie + theme only — no longer used for auth) ── */
+const KC="wi:cookie_v9", KTH="wi:theme_v9";
 async function dbG(k){
   try{
     if(typeof window==="undefined"||!window.localStorage)return null;
@@ -22,24 +30,52 @@ async function dbS(k,v){
 async function dbD(k){
   try{if(typeof window!=="undefined"&&window.localStorage)window.localStorage.removeItem(k);}catch{}
 }
-async function sha256(s){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s+"__wi9__"));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");}
 
-/* ── AUTH ── */
+/* ── AUTH — Supabase ── */
 async function registerUser(email,pw,name){
-  const users=await dbG(KU)||{};
-  if(users[email.toLowerCase()])throw new Error("Email already registered");
-  const hash=await sha256(pw);
-  users[email.toLowerCase()]={username:name,hash,tz:Intl.DateTimeFormat().resolvedOptions().timeZone,created:Date.now()};
-  await dbS(KU,users);
-  return{username:name,email,tz:Intl.DateTimeFormat().resolvedOptions().timeZone};
+  if(!supabase)throw new Error("Auth service unavailable");
+  // Sign up with Supabase Auth
+  const{data,error}=await supabase.auth.signUp({
+    email:email.toLowerCase().trim(),
+    password:pw,
+    options:{data:{username:name.trim(),tz:Intl.DateTimeFormat().resolvedOptions().timeZone}}
+  });
+  if(error)throw new Error(error.message==="User already registered"?"Email already registered":error.message);
+  // Supabase sends a confirmation email but we allow immediate use
+  const user=data.user;
+  if(!user)throw new Error("Registration failed — please try again");
+  return{
+    username:name.trim(),
+    email:user.email,
+    tz:Intl.DateTimeFormat().resolvedOptions().timeZone,
+    id:user.id
+  };
 }
 async function loginUser(email,pw){
-  const users=await dbG(KU)||{};
-  const rec=users[email.toLowerCase()];
-  if(!rec)throw new Error("Email not found");
-  if(await sha256(pw)!==rec.hash)throw new Error("Incorrect password");
-  return{username:rec.username,email,tz:rec.tz};
+  if(!supabase)throw new Error("Auth service unavailable");
+  const{data,error}=await supabase.auth.signInWithPassword({
+    email:email.toLowerCase().trim(),
+    password:pw
+  });
+  if(error){
+    if(error.message.includes("Invalid login"))throw new Error("Incorrect email or password");
+    throw new Error(error.message);
+  }
+  const user=data.user;
+  const meta=user.user_metadata||{};
+  return{
+    username:meta.username||email.split("@")[0],
+    email:user.email,
+    tz:meta.tz||Intl.DateTimeFormat().resolvedOptions().timeZone,
+    id:user.id
+  };
 }
+async function logoutUser(){
+  if(!supabase)return;
+  await supabase.auth.signOut();
+}
+// sha256 kept for any legacy checks but no longer used for auth
+async function sha256(s){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s+"__wi9__"));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");}
 
 /* ── EXCHANGE CONFIG ── */
 function getEx(c="usa"){
@@ -1091,7 +1127,7 @@ function AuthScreen({onLogin,T,isDark}){
     if(mode==="login"){
       if(!email||!pw)return setErr("Enter email and password");
       setBusy(true);
-      try{const s=await loginUser(email,pw);await dbS(KS,s);onLogin(s);}catch(e){setErr(e.message||"Login failed");}
+      try{const s=await loginUser(email,pw);onLogin(s);}catch(e){setErr(e.message||"Login failed");}
       setBusy(false);
     }else{
       if(!nameOk)return setErr("Name must be at least 2 characters");
@@ -1100,7 +1136,7 @@ function AuthScreen({onLogin,T,isDark}){
       if(pw!==pw2)return setErr("Passwords don't match");
       if(!terms)return setErr("Please accept the Terms & Conditions");
       setBusy(true);
-      try{const s=await registerUser(email,pw,name.trim());await dbS(KS,s);onLogin(s);}catch(e){setErr(e.message||"Registration failed");}
+      try{const s=await registerUser(email,pw,name.trim());onLogin(s);}catch(e){setErr(e.message||"Registration failed");}
       setBusy(false);
     }
   }
@@ -1855,20 +1891,62 @@ export default function App(){
   const CSS=makeCSS(T,darkMode);
 
   useEffect(()=>{
-    // Hard 3s timeout — so auth page ALWAYS loads even if storage is slow/broken
-    const fallback=setTimeout(()=>{setSess(s=>s===undefined?null:s);setCookie(c=>c===undefined?null:c);},3000);
-    Promise.all([dbG(KS),dbG(KC),dbG(KTH)]).then(([s,c,th])=>{
+    // Load theme + cookie from localStorage (unchanged)
+    dbG(KC).then(c=>setCookie(c||null));
+    dbG(KTH).then(th=>{if(th!==null&&th!==undefined)setDarkMode(!!th);});
+
+    // Check Supabase for existing session
+    const fallback=setTimeout(()=>{
+      setSess(s=>s===undefined?null:s);
+      setCookie(c=>c===undefined?null:c);
+    },3000);
+
+    if(!supabase){
+      // Supabase not configured — fall through to auth screen
       clearTimeout(fallback);
-      setSess(s||null);setCookie(c||null);
-      if(th!==null&&th!==undefined)setDarkMode(!!th);
-    }).catch(()=>{
+      setSess(null);
+      setCookie(null);
+      return;
+    }
+
+    // Get current session (persisted by Supabase automatically)
+    supabase.auth.getSession().then(({data:{session:sb}})=>{
       clearTimeout(fallback);
-      setSess(null);setCookie(null);
+      if(sb?.user){
+        const meta=sb.user.user_metadata||{};
+        setSess({
+          username:meta.username||sb.user.email.split("@")[0],
+          email:sb.user.email,
+          tz:meta.tz||Intl.DateTimeFormat().resolvedOptions().timeZone,
+          id:sb.user.id
+        });
+      }else{
+        setSess(null);
+      }
+      // Ensure cookie is never left as undefined after session resolves
+      setCookie(c=>c===undefined?null:c);
+    }).catch(()=>{clearTimeout(fallback);setSess(null);setCookie(c=>c===undefined?null:c);});
+
+    // Listen for auth state changes (login/logout/token refresh)
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_event,sb)=>{
+      if(sb?.user){
+        const meta=sb.user.user_metadata||{};
+        setSess({
+          username:meta.username||sb.user.email.split("@")[0],
+          email:sb.user.email,
+          tz:meta.tz||Intl.DateTimeFormat().resolvedOptions().timeZone,
+          id:sb.user.id
+        });
+      }else{
+        setSess(null);
+      }
     });
+
+    return()=>subscription?.unsubscribe();
   },[]);
 
-  async function handleLogin(s){await dbS(KS,s);setSess(s);}
-  async function handleLogout(){await dbD(KS);setSess(null);}
+  async function handleLogin(s){setSess(s);}
+  async function handleLogout(){await logoutUser();setSess(null);}
   async function acceptCookie(){const c={accepted:true,at:Date.now()};await dbS(KC,c);setCookie(c);}
   async function toggleTheme(){const nd=!darkMode;setDarkMode(nd);await dbS(KTH,nd);}
 

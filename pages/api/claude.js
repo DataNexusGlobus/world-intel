@@ -1,7 +1,6 @@
 // pages/api/claude.js
-// Gemini 2.0 Flash proxy — replaces Anthropic.
-// Supports web search (Google grounding) and JSON mode.
-// GEMINI_API_KEY is stored securely in Vercel env vars — never exposed to browser.
+// Gemini 2.0 Flash proxy — free, no credit card needed
+// GEMINI_API_KEY stored securely in Vercel env vars
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -11,43 +10,36 @@ export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return res.status(500).json({
-      error: "GEMINI_API_KEY not set. Add it in Vercel Environment Variables.",
+      error: "GEMINI_API_KEY not set in Vercel Environment Variables",
     });
   }
 
-  const { prompt, maxTokens = 2500, useSearch = false, jsonMode = false } = req.body;
+  const { prompt, maxTokens = 2500, useSearch = false, jsonMode = false } = req.body || {};
 
   if (!prompt) {
     return res.status(400).json({ error: "prompt is required" });
   }
 
-  // Choose model — flash is fast and free
   const model = "gemini-2.0-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-  // Build the request body
+  // Build Gemini request
   const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: prompt }],
-      },
-    ],
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       maxOutputTokens: maxTokens,
-      temperature: 0.7,
+      temperature: jsonMode ? 0.4 : 0.7,
     },
   };
 
-  // Web search mode — enable Google Search grounding
+  // Web search — Google Search grounding (NOT compatible with jsonMode)
   if (useSearch) {
-    body.tools = [{ google_search: {} }];
+    body.tools = [{ googleSearch: {} }];
   }
 
-  // JSON mode — tell Gemini to respond with pure JSON only
+  // JSON mode — force pure JSON output
   if (jsonMode) {
     body.generationConfig.responseMimeType = "application/json";
-    body.generationConfig.temperature = 0.4; // lower temp for consistent JSON
   }
 
   try {
@@ -59,21 +51,23 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
+    // Return full Gemini error for visibility
     if (!response.ok) {
-      console.error("Gemini error:", data);
+      console.error("Gemini API error:", JSON.stringify(data));
       return res.status(response.status).json({
         error: data?.error?.message || "Gemini API error",
+        geminiStatus: response.status,
+        detail: data?.error,
       });
     }
 
-    // Extract text from Gemini response structure
     const candidate = data?.candidates?.[0];
 
-    // Handle Gemini blocking response for safety/recitation
+    // Gemini blocked the response (safety, recitation, etc.)
     const finishReason = candidate?.finishReason;
     if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
-      console.warn("Gemini blocked response, reason:", finishReason);
-      return res.status(200).json({ text: "", error: `Gemini blocked: ${finishReason}` });
+      console.warn("Gemini blocked:", finishReason);
+      return res.status(200).json({ text: "", error: "Blocked: " + finishReason });
     }
 
     const text =
@@ -83,13 +77,14 @@ export default async function handler(req, res) {
         ?.join("") || "";
 
     if (!text) {
+      console.warn("Gemini returned empty text. Full response:", JSON.stringify(data));
       return res.status(200).json({ text: "", error: "Empty response from Gemini" });
     }
 
     return res.status(200).json({ text });
 
   } catch (err) {
-    console.error("Proxy error:", err);
-    return res.status(500).json({ error: "Proxy request failed", detail: err.message });
+    console.error("Proxy fetch error:", err.message);
+    return res.status(500).json({ error: "Proxy failed: " + err.message });
   }
 }

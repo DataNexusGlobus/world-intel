@@ -1,63 +1,58 @@
-// pages/api/test.js
-// TEMPORARY test endpoint — delete after debugging
+// pages/api/test.js — TEMPORARY, delete after confirming Groq works
 // Visit: https://world-intel-gamma.vercel.app/api/test
 
 export default async function handler(req, res) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
 
-  // Step 1: Check env var exists
   if (!apiKey) {
     return res.status(200).json({
-      step: "FAIL at step 1",
-      error: "GEMINI_API_KEY is not set in Vercel environment variables",
-      fix: "Go to Vercel → Settings → Environment Variables → add GEMINI_API_KEY"
+      step: "FAIL — GROQ_API_KEY not set in Vercel",
+      fix: "Vercel → Settings → Environment Variables → add GROQ_API_KEY"
     });
   }
 
-  // Step 2: Show key prefix (safe — only first 8 chars)
   const keyPreview = apiKey.substring(0, 8) + "..." + apiKey.slice(-4);
 
-  // Step 3: Try simplest possible Gemini call — no tools, no JSON mode
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-  
   try {
-    const response = await fetch(url, {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: "Say hello in one word" }] }],
-        generationConfig: { maxOutputTokens: 10 }
-      })
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: "Say hello in one word" }],
+        max_tokens: 10,
+      }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
       return res.status(200).json({
-        step: "FAIL at step 3 — Gemini rejected the request",
+        step: "FAIL — Groq rejected the request",
         httpStatus: response.status,
         keyUsed: keyPreview,
-        geminiError: data?.error?.message,
-        geminiCode: data?.error?.code,
-        geminiStatus: data?.error?.status,
-        fullResponse: data
+        groqError: data?.error?.message,
+        fullResponse: data,
       });
     }
 
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const text = data?.choices?.[0]?.message?.content || "";
 
     return res.status(200).json({
-      step: "SUCCESS",
+      step: "SUCCESS — Groq is working!",
       keyUsed: keyPreview,
-      geminiResponse: text,
-      message: "Gemini is working! The problem is elsewhere."
+      groqResponse: text,
+      message: "Live data will now work on your website."
     });
 
   } catch (err) {
     return res.status(200).json({
-      step: "FAIL at step 3 — network error",
+      step: "FAIL — network error",
       keyUsed: keyPreview,
-      error: err.message
+      error: err.message,
     });
   }
 }

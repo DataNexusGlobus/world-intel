@@ -127,7 +127,7 @@ async function searchWeb(query){
     (d.results||[]).slice(0,3).forEach(r=>{
       if(r.snippet)parts.push(`[${r.title}]: ${r.snippet}`);
     });
-    return parts.join("\n").slice(0,1200); // enough context for accurate facts
+    return parts.join("\n").slice(0,600); // keep short to avoid Groq timeout
   }catch{return "";}
 }
 
@@ -692,7 +692,7 @@ Do NOT use your training data for news content — only use what is in the searc
 If search results mention specific people, events, or facts — use exactly those.
 
 Return ONLY a JSON array of 8 objects — no markdown:
-[{"title":"headline from search results","source":"news outlet from results","country":"country","severity":"critical or high or medium or low","category":"conflict or military or cyber or economy or politics or trade or unrest or disaster","ago":"Xh ago","impact":"market or social impact","people":"who is affected","tradeEffect":"trade or market effect"}]`,2000);
+[{"title":"headline from search results","source":"news outlet from results","country":"country","severity":"critical or high or medium or low","category":"conflict or military or cyber or economy or politics or trade or unrest or disaster","ago":"Xh ago","impact":"market or social impact","people":"who is affected","tradeEffect":"trade or market effect"}]`,1200);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
     arr._isLive=true; _cs(_newsKey,arr); return arr;
@@ -720,7 +720,9 @@ async function fetchMarkets(country){
     uae:"EMAAR.DU=Emaar Properties,FAB.AD=First Abu Dhabi Bank,DPW.DU=DP World,ETISALAT.AD=Etisalat,ADNOCDIST.AD=ADNOC",
     saudiarabia:"2222.SR=Saudi Aramco,7010.SR=STC Telecom,1120.SR=Al Rajhi Bank,2010.SR=SABIC,1180.SR=NCB"};
   function getMRef(t){const tl=t.toLowerCase().replace(/\s+/g,"");return MKTREF[tl]||Object.entries(MKTREF).find(([k])=>tl.includes(k)||k.includes(tl))?.[1]||MKTREF.usa;}
-  const ref=getMRef(target);
+  const refRaw=getMRef(target);
+  // Convert "0700.HK=Tencent Holdings,9988.HK=Alibaba Group" into explicit instructions
+  const ref=refRaw.split(",").map(r=>{const[sym,name]=r.split("=");return `${sym.trim()} → name is "${name.trim()}"`}).join(", ");
   const raw=await callClaudeJSON(
 `Today is ${today}. Use ONLY the search results below for current stock prices and news.
 
@@ -734,13 +736,17 @@ Extract real prices from search results where available.
 Return JSON with key "stocks" — array of exactly 5 items, no markdown:
 {"stocks":[{"rank":1,"symbol":"EXACT_TICKER_FROM_LIST","name":"EXACT_COMPANY_NAME_FROM_LIST","sector":"sector","price":"${cur}PRICE","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VALUE","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VALUE","upside":"+12%","riskLevel":"LOW","whyNow":"reason from search results","catalyst":"event from search results","trend":"up"}]}
 signalStrength: integer 55-92. Mix BUY/HOLD/SELL signals.`,
-    "{",1800);
+    "{",1200);
   const obj=pObj(raw);
   // Extract stocks array from wrapper object
   const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
-  if(arr&&arr.length>=3&&arr[0]?.symbol&&!/^LDR\d$/.test(arr[0].symbol)){
+  // Reject if company names look like tickers (e.g. "0700.HK" instead of "Tencent Holdings")
+  const hasRealNames=arr&&arr.length>=3&&arr[0]?.name&&arr[0].name.length>5&&!arr[0].name.includes(".");
+  if(hasRealNames&&arr[0]?.symbol&&!/^LDR\d$/.test(arr[0].symbol)){
     // Normalize — Groq sometimes returns numbers as strings or vice versa
     const norm=arr.map(s=>({...s,
+      // Fix NA prices — use symbol-based estimate if Groq returns NA/null/0
+      price:(s.price&&s.price!=="NA"&&s.price!=="N/A"&&s.price!=="null"&&s.price!=="0")?s.price:s.currentPrice||"—",
       change1d_raw:parseFloat(s.change1d_raw)||0,
       change1w_raw:parseFloat(s.change1w_raw)||0,
       change1m_raw:parseFloat(s.change1m_raw)||0,
@@ -774,7 +780,8 @@ async function fetchStockPicks(country){
     uae:"EMAAR.DU=Emaar Properties,FAB.AD=First Abu Dhabi Bank,DPW.DU=DP World,ETISALAT.AD=Etisalat",
     saudiarabia:"2222.SR=Saudi Aramco,7010.SR=STC Telecom,1120.SR=Al Rajhi Bank,2010.SR=SABIC,1180.SR=NCB"};
   function getPRef(t){const tl=t.toLowerCase().replace(/\s+/g,"");return PKREF[tl]||Object.entries(PKREF).find(([k])=>tl.includes(k)||k.includes(tl))?.[1]||PKREF.usa;}
-  const ref=getPRef(target);
+  const refRaw=getPRef(target);
+  const ref=refRaw.split(",").map(r=>{const[sym,name]=r.split("=");return `${sym.trim()} → name is "${name.trim()}"`}).join(", ");
   const raw=await callClaudeJSON(
 `Today is ${today}. Use ONLY the search results below for current prices and analyst data.
 
@@ -810,7 +817,7 @@ All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentSco
     enriched.forEach(ep=>{
       if(!ep._priceReal)return;
       const pick=obj.picks.find(p=>p.symbol===ep.symbol);
-      if(pick){pick.currentPrice=ep.price;pick.change1d=ep.change1d;pick._priceReal=true;}
+      if(pick&&ep.price&&ep.price!=="N/A"&&ep.price!==0){pick.currentPrice=ep.price;pick.change1d=ep.change1d;pick._priceReal=true;}
     });
     obj._isLive=true; _cs(_pkKey,obj); return obj;
   }
@@ -833,7 +840,7 @@ Use real names of current leaders found in search results. Use real events menti
 
 Return a single JSON object — no markdown:
 {"threatLevel":"elevated or high or moderate or low","stabilityIndex":65,"summary":"2-3 sentences using facts from search results about ${t}","alerts":[{"type":"political","level":"high","title":"Real political event from search results","detail":"Detail from search results"},{"type":"economic","level":"medium","title":"Real economic issue from results","detail":"Detail from results"},{"type":"military","level":"medium","title":"Real security issue from results","detail":"Detail"},{"type":"cyber","level":"low","title":"Cyber or tech threat","detail":"Detail"}],"activeConflicts":["real conflict from results 1","conflict 2"],"economicPressures":["real pressure from results 1","pressure 2","pressure 3"],"cyberThreats":["threat 1","threat 2","threat 3"],"diplomaticAlerts":["alert from results 1","alert 2","alert 3"]}`,
-    "{",2000);
+    "{",1200);
   const obj=pObj(raw);
   if(obj&&obj.alerts&&obj.alerts.length>0){
     // Normalize fields — Groq sometimes returns uppercase or string numbers
@@ -861,7 +868,7 @@ Extract real numbers (GDP%, inflation%, interest rate%) directly from search res
 
 Return a single JSON object — no markdown:
 {"country":"${t}","stability":65,"geopoliticalScore":65,"confidenceScore":70,"economicOutlook":"positive or neutral or negative or critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG or STABLE or WEAK or VOLATILE","sixMonthPrediction":"3 sentences based on search results","workingClassForecast":"2 sentences about jobs and living costs in ${t}","marketOutlook":"2 sentences about ${t} markets","traderOpportunities":"2 sentences about opportunities in ${t}","keyRisks":["risk from results 1","risk 2","risk 3"],"opportunities":["opportunity 1","opportunity 2","opportunity 3"],"basedOn":"institutions mentioned in search results for ${t}"}`,
-    "{",2000);
+    "{",1200);
   const obj=pObj(raw);
   if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true; _cs(_fcKey,obj); return obj;}
   const fb=fbForecast(t);fb._isLive=false;return fb;
@@ -1633,16 +1640,41 @@ function PageStockPicks({country,setCountry,T}){
 /* ═══════════════════════════════════════════════════════════
    PAGE: GLOBAL MAP
 ═══════════════════════════════════════════════════════════ */
+// MAP_DOTS: x/y = position %, n = country name, tl = default threat level
+// tl drives color: critical=#ff3a5a high=#ff8c00 elevated=#f5c400 moderate=#4ade80 low=#00dc82
+// Colors update dynamically via fetchIntel when user clicks a country
 const MAP_DOTS=[
-  {x:56,y:26,n:"Ukraine",c:"#ff3a5a"},{x:72,y:21,n:"Russia",c:"#ff8c00"},{x:80,y:31,n:"China",c:"#ff8c00"},
-  {x:65,y:35,n:"Iran",c:"#ff8c00"},{x:83,y:33,n:"Taiwan",c:"#f5c400"},{x:84,y:26,n:"North Korea",c:"#ff3a5a"},
-  {x:81,y:40,n:"Myanmar",c:"#ff3a5a"},{x:58,y:43,n:"Sudan",c:"#ff3a5a"},{x:27,y:40,n:"Venezuela",c:"#f5c400"},
-  {x:13,y:17,n:"USA",c:"#00dc82"},{x:50,y:16,n:"UK",c:"#00dc82"},{x:52,y:18,n:"Germany",c:"#00dc82"},
-  {x:70,y:36,n:"India",c:"#f5c400"},{x:45,y:38,n:"Saudi Arabia",c:"#f5c400"},{x:86,y:36,n:"Japan",c:"#00dc82"},
-  {x:85,y:39,n:"South Korea",c:"#00dc82"},{x:66,y:32,n:"Pakistan",c:"#ff8c00"},{x:47,y:22,n:"France",c:"#00dc82"},
-  {x:17,y:35,n:"Brazil",c:"#f5c400"},{x:88,y:42,n:"Australia",c:"#00dc82"},{x:36,y:18,n:"Canada",c:"#00dc82"},
-  {x:57,y:20,n:"Israel",c:"#ff3a5a"},{x:62,y:29,n:"Iraq",c:"#ff8c00"},{x:75,y:37,n:"Bangladesh",c:"#f5c400"},
+  {x:56,y:26,n:"Ukraine",tl:"critical"},   // active war zone
+  {x:72,y:21,n:"Russia",tl:"critical"},    // war + sanctions
+  {x:80,y:31,n:"China",tl:"elevated"},     // Taiwan tensions, trade war
+  {x:65,y:35,n:"Iran",tl:"critical"},      // Israel-Iran conflict active
+  {x:83,y:33,n:"Taiwan",tl:"high"},        // China pressure
+  {x:84,y:26,n:"North Korea",tl:"critical"}, // nuclear + missile tests
+  {x:81,y:40,n:"Myanmar",tl:"critical"},   // civil war ongoing
+  {x:58,y:43,n:"Sudan",tl:"critical"},     // civil war ongoing
+  {x:27,y:40,n:"Venezuela",tl:"high"},     // economic collapse + political
+  {x:13,y:17,n:"USA",tl:"moderate"},       // stable
+  {x:50,y:16,n:"UK",tl:"low"},            // stable
+  {x:52,y:18,n:"Germany",tl:"moderate"},   // energy + economic pressure
+  {x:70,y:36,n:"India",tl:"moderate"},     // stable, border tensions
+  {x:45,y:38,n:"Saudi Arabia",tl:"elevated"}, // regional instability
+  {x:86,y:36,n:"Japan",tl:"low"},         // stable
+  {x:85,y:39,n:"South Korea",tl:"moderate"}, // NK threat
+  {x:66,y:32,n:"Pakistan",tl:"high"},     // economic crisis + political
+  {x:47,y:22,n:"France",tl:"moderate"},   // stable
+  {x:17,y:35,n:"Brazil",tl:"moderate"},   // stable
+  {x:88,y:42,n:"Australia",tl:"low"},     // stable
+  {x:36,y:18,n:"Canada",tl:"low"},        // stable
+  {x:57,y:20,n:"Israel",tl:"critical"},   // Gaza + Iran conflict active
+  {x:62,y:29,n:"Iraq",tl:"high"},        // instability ongoing
+  {x:75,y:37,n:"Bangladesh",tl:"elevated"}, // political transition
 ];
+
+// Map threat level string to color
+function mapThreatColor(tl,T){
+  const m={critical:"#ff3a5a",high:"#ff8c00",elevated:"#f5c400",moderate:"#4ade80",low:"#00dc82"};
+  return m[tl]||m.moderate;
+}
 
 function PageMap({onSelect,T}){
   const[hov,setHov]=useState(null);
@@ -1660,10 +1692,10 @@ function PageMap({onSelect,T}){
             {["M5,15 Q8,12 14,13 Q18,14 20,18 Q22,24 19,28 Q15,32 12,34 Q8,36 6,34 Q3,30 4,22 Z","M20,36 Q24,34 28,37 Q32,41 30,49 Q27,54 23,52 Q19,49 18,43 Z","M50,10 Q64,8 72,11 Q75,14 74,18 Q70,20 65,19 Q60,22 62,28 Q60,32 57,32 Q54,30 53,26 Q50,22 48,17 Z","M44,15 Q50,12 55,14 Q58,16 57,21 Q53,24 48,23 Q44,21 44,17 Z","M47,25 Q54,23 58,27 Q62,33 60,43 Q57,49 52,50 Q47,48 45,42 Q43,35 44,29 Z","M57,13 Q68,9 80,11 Q88,13 90,19 Q88,25 82,28 Q72,30 63,27 Q57,24 56,19 Z","M80,42 Q87,40 90,44 Q91,50 87,52 Q82,53 79,49 Q78,45 80,42 Z"].map((d,i)=><path key={i} d={d} fill={`${isDark?"rgba(0,204,245,.05)":"rgba(0,100,200,.06)"}`} stroke={`${isDark?"rgba(0,204,245,.14)":"rgba(0,100,200,.15)"}`} strokeWidth=".3"/>)}
             {MAP_DOTS.map((dot,i)=>(
               <g key={i} style={{cursor:"pointer"}} onClick={()=>onSelect(dot.n)} onMouseEnter={()=>setHov(dot.n)} onMouseLeave={()=>setHov(null)}>
-                <circle cx={dot.x} cy={dot.y} r={hov===dot.n?4.5:2.5} fill={dot.c} opacity={hov===dot.n?1:.75} style={{transition:"r .15s"}}><animate attributeName="opacity" values=".75;.3;.75" dur={`${1.8+i*.13}s`} repeatCount="indefinite"/></circle>
-                <circle cx={dot.x} cy={dot.y} r="1.3" fill={dot.c}/>
+                <circle cx={dot.x} cy={dot.y} r={hov===dot.n?4.5:2.5} fill={mapThreatColor(dot.tl,T)} opacity={hov===dot.n?1:.75} style={{transition:"r .15s"}}><animate attributeName="opacity" values=".75;.3;.75" dur={`${1.8+i*.13}s`} repeatCount="indefinite"/></circle>
+                <circle cx={dot.x} cy={dot.y} r="1.3" fill={mapThreatColor(dot.tl,T)}/>
                 <circle cx={dot.x} cy={dot.y} r="7" fill="transparent"/>
-                {hov===dot.n&&<><rect x={dot.x-13} y={dot.y-11} width="26" height="8.5" rx="1.5" fill={isDark?"rgba(6,10,18,.95)":"rgba(255,255,255,.95)"} stroke={dot.c} strokeWidth=".4"/><text x={dot.x} y={dot.y-5} textAnchor="middle" fill={dot.c} fontSize="2.8" fontFamily="Inter" fontWeight="bold">{dot.n}</text></>}
+                {hov===dot.n&&<><rect x={dot.x-13} y={dot.y-11} width="26" height="8.5" rx="1.5" fill={isDark?"rgba(6,10,18,.95)":"rgba(255,255,255,.95)"} stroke={mapThreatColor(dot.tl,T)} strokeWidth=".4"/><text x={dot.x} y={dot.y-5} textAnchor="middle" fill={mapThreatColor(dot.tl,T)} fontSize="2.8" fontFamily="Inter" fontWeight="bold">{dot.n}</text></>}
               </g>
             ))}
           </svg>
@@ -1687,7 +1719,7 @@ function PageMap({onSelect,T}){
 function PageIntel({country,setCountry,T}){
   const target=country||"Global";
   const SC=getSevC(T);
-  const THREAT_C={elevated:T.red,high:T.orange,moderate:T.yellow,low:T.green};
+  const THREAT_C={critical:"#ff3a5a",high:"#ff8c00",elevated:"#f5c400",moderate:"#4ade80",low:"#00dc82"};
   const TYPE_IC={military:"✈️",cyber:"💻",economic:"📉",political:"🏛️",disaster:"🌊"};
   const QC=["Global","India","USA","China","Russia","Middle East","Europe","South Asia"];
 
@@ -1705,7 +1737,9 @@ function PageIntel({country,setCountry,T}){
       <div style={{padding:"18px 26px"}}>
         <AsyncBlock key={target} loadFn={useCallback(()=>fetchIntel(target),[target])} color={T.orange} successCheck={d=>d?.alerts} T={T}>
           {data=>{
-            const tc=THREAT_C[data.threatLevel]||T.orange;
+            // Use live intel data if available, else fall back to dot's default tl
+            const liveTl=data&&data.threatLevel?data.threatLevel:dot.tl;
+            const tc=THREAT_C[liveTl]||mapThreatColor(dot.tl,T);
             return(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{padding:"16px 20px",borderRadius:11,background:`${tc}10`,border:`1px solid ${tc}33`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
@@ -1834,6 +1868,34 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
   }
 
   useEffect(()=>{const id=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(id);},[]);
+
+  // PRELOAD: warm cache for India + USA silently on mount
+  // India first (majority of users are Indian), then USA
+  // 3s gap between each call to avoid Groq rate limits
+  // By the time user clicks any tab, data is already cached = instant load
+  useEffect(()=>{
+    const preload=async()=>{
+      const jobs=[
+        ()=>fetchNews("India"),
+        ()=>fetchNews("Global"),
+        ()=>fetchMarkets("India"),
+        ()=>fetchIntel("India"),
+        ()=>fetchForecast("India"),
+        ()=>fetchStockPicks("India"),
+        ()=>fetchNews("USA"),
+        ()=>fetchMarkets("USA"),
+        ()=>fetchIntel("USA"),
+        ()=>fetchForecast("USA"),
+        ()=>fetchStockPicks("USA"),
+      ];
+      for(let i=0;i<jobs.length;i++){
+        try{await jobs[i]();}catch(e){}
+        if(i<jobs.length-1)await new Promise(r=>setTimeout(r,3000));
+      }
+    };
+    const t=setTimeout(preload,2000); // wait 2s for auth/UI to settle
+    return()=>clearTimeout(t);
+  },[]); // eslint-disable-line
 
   const tz=session.tz||Intl.DateTimeFormat().resolvedOptions().timeZone;
   const timeStr=new Intl.DateTimeFormat("en",{timeZone:tz,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date(clock));

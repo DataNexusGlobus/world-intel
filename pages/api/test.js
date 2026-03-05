@@ -1,6 +1,3 @@
-// pages/api/test.js — tests both Groq and Tavily
-// Delete after confirming both work
-
 export default async function handler(req, res) {
   const groqKey = process.env.GROQ_API_KEY;
   const tavilyKey = process.env.TAVILY_API_KEY;
@@ -20,25 +17,28 @@ export default async function handler(req, res) {
       })
     });
     const d = await r.json();
-    const text = d?.choices?.[0]?.message?.content || "";
     results.groq = {
       status: r.ok ? "SUCCESS ✅" : "FAIL ❌",
       elapsedMs: Date.now() - start,
-      response: text,
       error: r.ok ? undefined : d?.error?.message,
     };
   } catch(e) { results.groq = { status: "FAIL ❌", error: e.message }; }
 
-  // Test 2: Tavily
+  // Test 2: Tavily — use specific factual query to avoid misinformation
   if (!tavilyKey) {
-    results.tavily = { status: "NOT SET ⚠️", message: "Add TAVILY_API_KEY to Vercel env vars. Get free key at tavily.com" };
+    results.tavily = { status: "NOT SET ⚠️", message: "Add TAVILY_API_KEY to Vercel env vars" };
   } else {
     try {
       const start = Date.now();
       const r = await fetch("https://api.tavily.com/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: tavilyKey, query: "US president 2026", max_results: 2, include_answer: true })
+        body: JSON.stringify({
+          api_key: tavilyKey,
+          query: "S&P 500 index price today March 2026",
+          max_results: 2,
+          include_answer: true
+        })
       });
       const d = await r.json();
       results.tavily = {
@@ -46,6 +46,7 @@ export default async function handler(req, res) {
         elapsedMs: Date.now() - start,
         answer: d.answer || "",
         resultsCount: d.results?.length || 0,
+        note: "Tavily is used for stock prices & news only — political facts come from WF context block",
         error: r.ok ? undefined : d?.message,
       };
     } catch(e) { results.tavily = { status: "FAIL ❌", error: e.message }; }
@@ -53,7 +54,7 @@ export default async function handler(req, res) {
 
   const allGood = results.groq?.status?.includes("SUCCESS") && results.tavily?.status?.includes("SUCCESS");
   return res.status(200).json({
-    summary: allGood ? "Groq ✅ + Tavily ✅ — Live data pipeline fully working!" : "Check individual results below",
+    summary: allGood ? "Groq ✅ + Tavily ✅ — pipeline working!" : "Check results below",
     ...results
   });
 }

@@ -687,7 +687,8 @@ async function fetchNews(q){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
 `${WF}
-${await searchWeb(`${q} breaking news today current events`)}
+SEARCH RESULTS (use for recent events only — WF facts above override any conflicting political info):
+${await searchWeb(`${q} news today March 2026`)}
 
 Generate 8 relevant breaking news stories for "${q}" as of ${today}. Use SEARCH RESULTS above for real current events.
 Make stories specific and varied across politics, economy, military, trade, technology.
@@ -722,7 +723,8 @@ async function fetchMarkets(country){
   const ref=getMRef(target);
   const raw=await callClaudeJSON(
 `${WF}
-${await searchWeb(`${target} stock market prices ${ex} today ${exIdx}`)}
+SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
+${await searchWeb(`${exIdx} index stocks price today March 2026`)}
 
 Generate stock market data for ${target}'s ${ex} (${exIdx}) as of ${today}.
 Use ONLY these exact tickers and company names: ${ref}
@@ -772,7 +774,8 @@ async function fetchStockPicks(country){
   const ref=getPRef(target);
   const raw=await callClaudeJSON(
 `${WF}
-${await searchWeb(`${target} stock picks analyst ratings best stocks ${exIdx} 2026`)}
+SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
+${await searchWeb(`${target} top stocks ${exIdx} analyst buy rating 2026`)}
 
 Investment analysis for ${target}'s ${ex} (${exIdx}) as of ${today}.
 Use ONLY these tickers and company names: ${ref}
@@ -816,7 +819,8 @@ async function fetchIntel(country){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
 `${WF}
-${await searchWeb(`${t} geopolitical situation security threats political news 2026`)}
+SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
+${await searchWeb(`${t} conflict economy news March 2026`)}
 
 Geopolitical intelligence briefing for ${t} as of ${today}.
 Use SEARCH RESULTS above for real current events in ${t}.
@@ -842,7 +846,8 @@ async function fetchForecast(country){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
 `${WF}
-${await searchWeb(`${t} economy GDP inflation interest rate 2026 economic forecast`)}
+SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
+${await searchWeb(`${t} GDP growth rate inflation 2025 2026`)}
 
 Economic forecast for ${t} as of ${today}.
 Use SEARCH RESULTS above for real current GDP, inflation, interest rates for ${t}.

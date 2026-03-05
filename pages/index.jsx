@@ -157,16 +157,16 @@ async function fetchRealPrices(stocks){
   }
 }
 
-/* callClaude — returns raw text (for news) */
-async function callClaude(prompt,maxTokens=1800,retries=2){
-  const ck=_ck("ws:"+prompt);
+/* callClaude — Gemini 2.5 Flash with Google Search grounding (all calls) */
+async function callClaude(prompt,maxTokens=2000,retries=2){
+  const ck=_ck(prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
-    if(i>0)await new Promise(r=>setTimeout(r,30000)); // 30s wait on retry
+    if(i>0)await new Promise(r=>setTimeout(r,15000));
     try{
-      await _throttle(); // never fire more than 1 call per 4s
+      await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens,useSearch:false,jsonMode:false})});
+        body:JSON.stringify({prompt,maxTokens})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";
@@ -176,16 +176,17 @@ async function callClaude(prompt,maxTokens=1800,retries=2){
   return "";
 }
 
-/* callClaudeJSON — JSON mode, returns pure JSON string */
-async function callClaudeJSON(prompt,prefill="{",maxTokens=2000,retries=2){
-  const ck=_ck("j:"+prefill+":"+prompt);
+/* callClaudeJSON — same as callClaude but prompts ask for JSON output
+   Gemini uses Google Search then returns JSON in text — we parse with _extractJSON */
+async function callClaudeJSON(prompt,prefill="{",maxTokens=2500,retries=2){
+  const ck=_ck(prefill+":"+prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
-    if(i>0)await new Promise(r=>setTimeout(r,30000)); // 30s wait on retry
+    if(i>0)await new Promise(r=>setTimeout(r,15000));
     try{
-      await _throttle(); // never fire more than 1 call per 4s
+      await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens,useSearch:false,jsonMode:true,prefill})});
+        body:JSON.stringify({prompt,maxTokens})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";
@@ -657,9 +658,11 @@ function pObj(raw){const r=_extractJSON(raw,"{","}");return r&&typeof r==="objec
 async function fetchNews(q){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
-`Generate 8 breaking news stories for "${q}" as of ${today}. Use real leaders, companies, events.
-Return ONLY a JSON array of 8 objects with keys: title, source, country, severity (critical|high|medium|low), category (conflict|military|cyber|economy|politics|trade|unrest|infrastructure|disaster), ago, impact, people, tradeEffect.
-No markdown, no text outside the array.`,1800);
+`Search the web for the 8 most important breaking news stories right now about "${q}" as of ${today}.
+Find real current events — use your Google Search to get the latest headlines, not old training data.
+
+Return ONLY a JSON array of 8 objects, no markdown, no text outside the array:
+[{"title":"real current headline","source":"real news outlet","country":"country name","severity":"critical or high or medium or low","category":"conflict or military or cyber or economy or politics or trade or unrest or disaster","ago":"Xh ago","impact":"specific impact on markets/people","people":"who is affected and how","tradeEffect":"market/trade effect"}]`,2000);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
     arr._isLive=true; return arr;
@@ -671,27 +674,29 @@ async function fetchMarkets(country){
   const target=(country&&country.trim())||"USA";
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
-  const MKTREF={india:"RELIANCE.NS=Reliance Industries, TCS.NS=TCS, HDFCBANK.NS=HDFC Bank, INFY.NS=Infosys, ITC.NS=ITC",
-    usa:"AAPL=Apple, MSFT=Microsoft, NVDA=Nvidia, AMZN=Amazon, META=Meta",
-    uk:"HSBA.L=HSBC, SHEL.L=Shell, AZN.L=AstraZeneca, ULVR.L=Unilever, BP.L=BP",
-    china:"0700.HK=Tencent, 9988.HK=Alibaba, 002594.SZ=BYD, 601318.SS=Ping An, 600519.SS=Kweichow Moutai",
-    japan:"7203.T=Toyota, 6758.T=Sony, 9984.T=SoftBank, 7974.T=Nintendo, 6861.T=Keyence",
-    germany:"SAP.DE=SAP, SIE.DE=Siemens, ALV.DE=Allianz, BAS.DE=BASF, BMW.DE=BMW",
-    korea:"005930.KS=Samsung Electronics, 000660.KS=SK Hynix, 005380.KS=Hyundai, 035720.KS=Kakao, 051910.KS=LG Chem",
-    australia:"BHP.AX=BHP Group, CBA.AX=Commonwealth Bank, ANZ.AX=ANZ Bank, CSL.AX=CSL Limited, WES.AX=Wesfarmers",
-    brazil:"PETR4.SA=Petrobras, VALE3.SA=Vale, ITUB4.SA=Itaú Unibanco, BBDC4.SA=Bradesco, EMBR3.SA=Embraer",
-    france:"MC.PA=LVMH, TTE.PA=TotalEnergies, SAN.PA=Sanofi, BNP.PA=BNP Paribas, AIR.PA=Airbus",
-    canada:"SHOP.TO=Shopify, RY.TO=Royal Bank, TD.TO=TD Bank, ABX.TO=Barrick Gold, CNR.TO=Canadian National Rail",
-    uae:"EMAAR.DU=Emaar Properties, FAB.AD=First Abu Dhabi Bank, DPW.DU=DP World, ETISALAT.AD=Etisalat, ADNOCDIST.AD=ADNOC",
-    saudi:"2222.SR=Saudi Aramco, 7010.SR=STC, 1120.SR=Al Rajhi Bank, 2010.SR=SABIC, 1180.SR=NCB"};
-  const tl=target.toLowerCase().replace(" ","");
-  const ref=MKTREF[tl]||MKTREF.usa;
+  const MKTREF={india:"RELIANCE.NS=Reliance Industries,TCS.NS=TCS,HDFCBANK.NS=HDFC Bank,INFY.NS=Infosys,ITC.NS=ITC",
+    usa:"AAPL=Apple,MSFT=Microsoft,NVDA=Nvidia,AMZN=Amazon,META=Meta",
+    uk:"HSBA.L=HSBC,SHEL.L=Shell,AZN.L=AstraZeneca,ULVR.L=Unilever,BP.L=BP",
+    china:"0700.HK=Tencent Holdings,9988.HK=Alibaba Group,002594.SZ=BYD Company,601318.SS=Ping An Insurance,600519.SS=Kweichow Moutai",
+    japan:"7203.T=Toyota Motor,6758.T=Sony Group,9984.T=SoftBank Group,7974.T=Nintendo,6861.T=Keyence",
+    germany:"SAP.DE=SAP SE,SIE.DE=Siemens AG,ALV.DE=Allianz SE,BAS.DE=BASF SE,BMW.DE=BMW AG",
+    southkorea:"005930.KS=Samsung Electronics,000660.KS=SK Hynix,005380.KS=Hyundai Motor,035720.KS=Kakao,051910.KS=LG Chem",
+    australia:"BHP.AX=BHP Group,CBA.AX=Commonwealth Bank,ANZ.AX=ANZ Bank,CSL.AX=CSL Limited,WES.AX=Wesfarmers",
+    brazil:"PETR4.SA=Petrobras,VALE3.SA=Vale SA,ITUB4.SA=Itau Unibanco,BBDC4.SA=Bradesco,EMBR3.SA=Embraer",
+    france:"MC.PA=LVMH,TTE.PA=TotalEnergies,SAN.PA=Sanofi,BNP.PA=BNP Paribas,AIR.PA=Airbus",
+    canada:"SHOP.TO=Shopify,RY.TO=Royal Bank of Canada,TD.TO=TD Bank,ABX.TO=Barrick Gold,CNR.TO=CN Rail",
+    uae:"EMAAR.DU=Emaar Properties,FAB.AD=First Abu Dhabi Bank,DPW.DU=DP World,ETISALAT.AD=Etisalat,ADNOCDIST.AD=ADNOC",
+    saudiarabia:"2222.SR=Saudi Aramco,7010.SR=STC Telecom,1120.SR=Al Rajhi Bank,2010.SR=SABIC,1180.SR=NCB"};
+  function getMRef(t){const tl=t.toLowerCase().replace(/\s+/g,"");return MKTREF[tl]||Object.entries(MKTREF).find(([k])=>tl.includes(k)||k.includes(tl))?.[1]||MKTREF.usa;}
+  const ref=getMRef(target);
   const raw=await callClaudeJSON(
-`Generate stock market data for ${target}'s ${ex} (${exIdx}) as of ${today}.
-Use these exact tickers and company names: ${ref}
-Pick 5, use realistic current prices in ${cur}, mix of BUY/HOLD/SELL signals.
-Return JSON: {"stocks":[{"rank":1,"symbol":"TICKER","name":"EXACT Company Name from list above","sector":"sector","price":"${cur}PRICE","change1d":"+X.XX%","change1d_raw":X.XX,"change1w":"+X.XX%","change1w_raw":X.XX,"change1m":"+X.XX%","change1m_raw":X.XX,"volume":"XX.XM","marketCap":"${cur}X.XT","pe":"XX.X","signal":"BUY","signalStrength":NUMBER_60_TO_90,"shortTerm":"BULLISH or BEARISH","longTerm":"BULLISH or BEARISH","targetPrice":"${cur}PRICE","upside":"+XX%","riskLevel":"LOW or MEDIUM or HIGH","whyNow":"real reason","catalyst":"real catalyst","trend":"up or down"}]}`,
-    "{",1800);
+`Search the web for current stock prices and market data for ${target}'s ${ex} (${exIdx}) as of ${today}.
+Use ONLY these tickers and their exact company names: ${ref}
+
+Return a JSON object with key "stocks" containing array of 5 items with real current data:
+{"stocks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name from list","sector":"sector","price":"${cur}REAL_CURRENT_PRICE","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VALUE","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VALUE","upside":"+12%","riskLevel":"LOW","whyNow":"current reason based on real news","catalyst":"real recent event","trend":"up"}]}
+Use real searched prices. signalStrength must be integer 55-92. Return only JSON, no markdown.`,
+    "{",2000);
   const obj=pObj(raw);
   // Extract stocks array from wrapper object
   const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
@@ -714,26 +719,29 @@ async function fetchStockPicks(country){
   const target=(country&&country.trim())||"USA";
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
-  const PKREF={india:"RELIANCE.NS=Reliance, TCS.NS=TCS, HDFCBANK.NS=HDFC Bank, INFY.NS=Infosys, ITC.NS=ITC",
-    usa:"AAPL=Apple, MSFT=Microsoft, NVDA=Nvidia, AMZN=Amazon, META=Meta",
-    uk:"HSBA.L=HSBC, SHEL.L=Shell, AZN.L=AstraZeneca, ULVR.L=Unilever, BP.L=BP",
-    china:"0700.HK=Tencent, 9988.HK=Alibaba, 002594.SZ=BYD, 601318.SS=Ping An, 600519.SS=Kweichow Moutai",
-    japan:"7203.T=Toyota, 6758.T=Sony, 9984.T=SoftBank, 7974.T=Nintendo, 6861.T=Keyence",
-    germany:"SAP.DE=SAP, SIE.DE=Siemens, ALV.DE=Allianz, BAS.DE=BASF, BMW.DE=BMW",
-    korea:"005930.KS=Samsung, 000660.KS=SK Hynix, 005380.KS=Hyundai, 035720.KS=Kakao, 051910.KS=LG Chem",
-    australia:"BHP.AX=BHP, CBA.AX=Commonwealth Bank, ANZ.AX=ANZ, CSL.AX=CSL, WES.AX=Wesfarmers",
-    brazil:"PETR4.SA=Petrobras, VALE3.SA=Vale, ITUB4.SA=Itaú, BBDC4.SA=Bradesco, EMBR3.SA=Embraer",
-    france:"MC.PA=LVMH, TTE.PA=TotalEnergies, SAN.PA=Sanofi, BNP.PA=BNP Paribas, AIR.PA=Airbus",
-    canada:"SHOP.TO=Shopify, RY.TO=Royal Bank, TD.TO=TD Bank, ABX.TO=Barrick Gold, CNR.TO=CN Rail",
-    uae:"EMAAR.DU=Emaar, FAB.AD=First Abu Dhabi Bank, DPW.DU=DP World, ETISALAT.AD=Etisalat",
-    saudi:"2222.SR=Saudi Aramco, 7010.SR=STC, 1120.SR=Al Rajhi Bank, 2010.SR=SABIC"};
-  const tl=target.toLowerCase().replace(" ","");
-  const ref=PKREF[tl]||PKREF.usa;
+  const PKREF={
+    india:"RELIANCE.NS=Reliance Industries,TCS.NS=TCS,HDFCBANK.NS=HDFC Bank,INFY.NS=Infosys,ITC.NS=ITC",
+    usa:"AAPL=Apple,MSFT=Microsoft,NVDA=Nvidia,AMZN=Amazon,META=Meta",
+    uk:"HSBA.L=HSBC,SHEL.L=Shell,AZN.L=AstraZeneca,ULVR.L=Unilever,BP.L=BP",
+    china:"0700.HK=Tencent Holdings,9988.HK=Alibaba Group,002594.SZ=BYD Company,601318.SS=Ping An Insurance,600519.SS=Kweichow Moutai",
+    japan:"7203.T=Toyota Motor,6758.T=Sony Group,9984.T=SoftBank Group,7974.T=Nintendo,6861.T=Keyence",
+    germany:"SAP.DE=SAP SE,SIE.DE=Siemens AG,ALV.DE=Allianz SE,BAS.DE=BASF SE,BMW.DE=BMW AG",
+    southkorea:"005930.KS=Samsung Electronics,000660.KS=SK Hynix,005380.KS=Hyundai Motor,035720.KS=Kakao,051910.KS=LG Chem",
+    australia:"BHP.AX=BHP Group,CBA.AX=Commonwealth Bank,ANZ.AX=ANZ Bank,CSL.AX=CSL Limited,WES.AX=Wesfarmers",
+    brazil:"PETR4.SA=Petrobras,VALE3.SA=Vale SA,ITUB4.SA=Itau Unibanco,BBDC4.SA=Bradesco,EMBR3.SA=Embraer",
+    france:"MC.PA=LVMH,TTE.PA=TotalEnergies,SAN.PA=Sanofi,BNP.PA=BNP Paribas,AIR.PA=Airbus",
+    canada:"SHOP.TO=Shopify,RY.TO=Royal Bank of Canada,TD.TO=TD Bank,ABX.TO=Barrick Gold,CNR.TO=CN Rail",
+    uae:"EMAAR.DU=Emaar Properties,FAB.AD=First Abu Dhabi Bank,DPW.DU=DP World,ETISALAT.AD=Etisalat",
+    saudiarabia:"2222.SR=Saudi Aramco,7010.SR=STC Telecom,1120.SR=Al Rajhi Bank,2010.SR=SABIC,1180.SR=NCB"};
+  function getPRef(t){const tl=t.toLowerCase().replace(/\s+/g,"");return PKREF[tl]||Object.entries(PKREF).find(([k])=>tl.includes(k)||k.includes(tl))?.[1]||PKREF.usa;}
+  const ref=getPRef(target);
   const raw=await callClaudeJSON(
-`Investment analysis for ${target}'s ${ex} (${exIdx}) as of ${today}.
-Use these real stocks: ${ref}
-Return JSON with REAL values — not placeholder text or template numbers:
-{"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish or neutral or bearish","sentimentScore":REAL_NUMBER,"fearGreedIndex":REAL_NUMBER,"indexChange1d":"REAL_%","indexChange1w":"REAL_%","marketOutlook":"2 real sentences about ${target} market","macroFactors":["real factor 1","real factor 2","real factor 3"],"keyDrivers":["real driver 1","real driver 2"],"sectorRotation":{"leading":["sector1","sector2"],"lagging":["sector1","sector2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"EXACT NAME from list","sector":"sector","currentPrice":"${cur}REAL_PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+X%","upside6m":"+X%","upside1y":"+X%","signal":"BUY or HOLD or SELL","tradingSignal":"BUY","investmentSignal":"BUY","rsi":REAL_NUMBER_30_TO_75,"maSignal":"BULLISH CROSSOVER","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:2.5","volatility":"LOW or MEDIUM or HIGH","beta":REAL_NUMBER,"pe":"REAL_PE","epsGrowth":"+X%","revenueGrowth":"+X%","debtEquity":"REAL","dividendYield":"REAL_%","institutionalOwnership":"REAL_%","thesis":"2 specific sentences for ${target}","tradingSetup":"1 sentence","catalysts":["real catalyst 1","real catalyst 2"],"risks":["real risk 1","real risk 2"],"newsDriver":"1 real sentence","confidence":REAL_NUMBER_60_TO_90,"timeframe":"Q2 2025"}]}`,
+`Search the web for current stock prices, analyst ratings and market conditions for ${target}'s ${ex} (${exIdx}) as of ${today}.
+Use ONLY these tickers and company names: ${ref}
+
+Return a JSON object with ALL fields filled with real current data — no placeholder text:
+{"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":68,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"Two specific sentences about ${target} market right now.","macroFactors":["real factor 1","real factor 2","real factor 3"],"keyDrivers":["real driver 1","real driver 2"],"sectorRotation":{"leading":["sector1","sector2"],"lagging":["sector1","sector2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","currentPrice":"${cur}NUM","targetPrice1m":"${cur}NUM","targetPrice6m":"${cur}NUM","targetPrice1y":"${cur}NUM","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH CROSSOVER","volumeTrend":"INCREASING","supportLevel":"${cur}NUM","resistanceLevel":"${cur}NUM","stopLoss":"${cur}NUM","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25.4","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"Two specific sentences about why to buy this stock now.","tradingSetup":"One sentence trading setup.","catalysts":["real catalyst 1","real catalyst 2"],"risks":["real risk 1","real risk 2"],"newsDriver":"One sentence about recent news.","confidence":75,"timeframe":"Q2 2025"}]}
+All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentScore and fearGreedIndex must be integers 30-90.`,
     "{",2200);
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=3&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
@@ -768,14 +776,13 @@ async function fetchIntel(country){
   const t=(country&&country.trim())||"Global";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Write a real geopolitical intelligence briefing for ${t} as of ${today}.
-Use actual known situation for ${t} — real leaders, real conflicts, real economic issues. Do NOT use placeholder text.
-threatLevel must reflect reality: e.g. Russia/Middle East = high, India = moderate, USA = moderate, Europe = moderate.
-stabilityIndex must be realistic: e.g. India=68, USA=72, Russia=35, China=55, Middle East=30.
+`Search the web for current geopolitical situation in ${t} as of ${today}.
+Find real current political leaders, active conflicts, economic conditions, and security threats for ${t}.
 
-Return this JSON with REAL content for ${t}:
-{"threatLevel":"elevated or high or moderate or low","stabilityIndex":REAL_NUMBER,"summary":"2-3 real sentences about current ${t} situation","alerts":[{"type":"political","level":"high or medium or low","title":"real specific title","detail":"real specific detail"},{"type":"economic","level":"medium","title":"real title","detail":"real detail"},{"type":"military","level":"medium","title":"real title","detail":"real detail"},{"type":"cyber","level":"low","title":"real title","detail":"real detail"}],"activeConflicts":["real conflict 1","real conflict 2"],"economicPressures":["real pressure 1","real pressure 2","real pressure 3"],"cyberThreats":["real threat 1","real threat 2","real threat 3"],"diplomaticAlerts":["real alert 1","real alert 2","real alert 3"]}`,
-    "{",2000);
+Return a single JSON object — all content must be current and specific to ${t}:
+{"threatLevel":"elevated or high or moderate or low","stabilityIndex":65,"summary":"2-3 sentences about current real situation in ${t}","alerts":[{"type":"political","level":"high","title":"Current real political event in ${t}","detail":"Specific detail"},{"type":"economic","level":"medium","title":"Real economic issue","detail":"Specific detail"},{"type":"military","level":"medium","title":"Real security issue","detail":"Specific detail"},{"type":"cyber","level":"low","title":"Real cyber threat","detail":"Specific detail"}],"activeConflicts":["real active conflict 1","real conflict 2"],"economicPressures":["real pressure 1","real pressure 2","real pressure 3"],"cyberThreats":["real threat 1","real threat 2","real threat 3"],"diplomaticAlerts":["real alert 1","real alert 2","real alert 3"]}
+Return only the JSON object, no markdown fences.`,
+    "{",2500);
   const obj=pObj(raw);
   if(obj&&obj.alerts&&obj.alerts.length>0){
     // Normalize fields — Groq sometimes returns uppercase or string numbers
@@ -791,13 +798,13 @@ async function fetchForecast(country){
   const t=(country&&country.trim())||"USA";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Write a real economic forecast for ${t} as of ${today}. Use actual known figures for ${t} — real GDP rate, real inflation, real central bank interest rate, real unemployment.
-Do NOT use placeholder numbers. Every number must be realistic for ${t} specifically.
-Examples: India GDP ~7%, inflation ~5%, RBI rate ~6.5%. USA GDP ~2.8%, inflation ~3%, Fed rate ~5.25%. China GDP ~5%, Japan GDP ~1.2%.
+`Search the web for current economic data for ${t} as of ${today}.
+Find real GDP growth rate, inflation rate, central bank interest rate, unemployment rate, and economic outlook for ${t}.
 
-Return this exact JSON structure with REAL values filled in:
-{"country":"${t}","stability":REAL_NUMBER_60_TO_85,"geopoliticalScore":REAL_NUMBER_50_TO_80,"confidenceScore":REAL_NUMBER_55_TO_80,"economicOutlook":"positive or neutral or negative","gdpGrowth":"REAL_%","inflation":"REAL_%","unemployment":"REAL_%","interestRate":"REAL_%","currencyStrength":"STRONG or STABLE or WEAK","sixMonthPrediction":"3 specific sentences about ${t}","workingClassForecast":"2 sentences about jobs and cost of living in ${t}","marketOutlook":"2 sentences about ${t} stock market","traderOpportunities":"2 sentences about opportunities in ${t}","keyRisks":["specific risk 1 for ${t}","specific risk 2","specific risk 3"],"opportunities":["opportunity 1 in ${t}","opportunity 2","opportunity 3"],"basedOn":"list real institutions like RBI, Fed, IMF, MOSPI etc relevant to ${t}"}`,
-    "{",2000);
+Return a single JSON object with current real data for ${t}:
+{"country":"${t}","stability":68,"geopoliticalScore":65,"confidenceScore":72,"economicOutlook":"positive or neutral or negative or critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG or STABLE or WEAK or VOLATILE","sixMonthPrediction":"3 sentences specific to ${t} economic outlook","workingClassForecast":"2 sentences about jobs wages cost of living in ${t}","marketOutlook":"2 sentences about ${t} equity market","traderOpportunities":"2 sentences about investment opportunities in ${t}","keyRisks":["risk 1","risk 2","risk 3"],"opportunities":["opportunity 1","opportunity 2","opportunity 3"],"basedOn":"real institutions like RBI Fed BoE ECB relevant to ${t}"}
+Return only the JSON object, no markdown.`,
+    "{",2500);
   const obj=pObj(raw);
   if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true;return obj;}
   const fb=fbForecast(t);fb._isLive=false;return fb;

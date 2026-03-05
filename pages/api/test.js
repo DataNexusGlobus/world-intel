@@ -1,47 +1,46 @@
-// pages/api/test.js — deep diagnostic
+// pages/api/test.js — TEMPORARY, delete after confirming Gemini works
+// Visit: https://world-intel-gamma.vercel.app/api/test
+
 export default async function handler(req, res) {
-  const groqKey = process.env.GROQ_API_KEY;
-  const results = {};
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return res.status(200).json({ step: "FAIL", error: "GEMINI_API_KEY not set" });
 
-  // Test 1: Basic call
+  const keyPreview = apiKey.substring(0, 10) + "..." + apiKey.slice(-4);
+
   try {
-    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
       method: "POST",
-      headers: {"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
-      body: JSON.stringify({model:"llama-3.3-70b-versatile",messages:[{role:"user",content:"Who is the current US president as of March 2026?"}],max_tokens:50}),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: "Who is the current US president as of today? Answer in one sentence." }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { maxOutputTokens: 100 }
+      })
     });
-    const d = await r.json();
-    results.basicTest = {
-      status: r.status,
-      ok: r.ok,
-      response: d?.choices?.[0]?.message?.content,
-      error: d?.error?.message,
-      tokensUsed: d?.usage?.total_tokens
-    };
-  } catch(e){ results.basicTest = {error: e.message}; }
 
-  // Test 2: JSON mode with small prompt
-  try {
-    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
-      body: JSON.stringify({model:"llama-3.3-70b-versatile",messages:[{role:"user",content:'Return JSON: {"country":"India","gdpGrowth":"7.1%","president":"Narendra Modi"}'}],max_tokens:100,response_format:{type:"json_object"}}),
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(200).json({
+        step: "FAIL — Gemini rejected",
+        httpStatus: response.status,
+        keyUsed: keyPreview,
+        error: data?.error?.message,
+        code: data?.error?.status,
+      });
+    }
+
+    const text = data?.candidates?.[0]?.content?.parts?.filter(p=>p.text)?.map(p=>p.text)?.join("") || "";
+
+    return res.status(200).json({
+      step: "SUCCESS ✅ — Gemini 2.5 Flash working with Google Search",
+      keyUsed: keyPreview,
+      response: text,
+      usedSearch: !!data?.candidates?.[0]?.groundingMetadata,
     });
-    const d = await r.json();
-    results.jsonTest = {
-      status: r.status,
-      ok: r.ok,
-      response: d?.choices?.[0]?.message?.content,
-      error: d?.error?.message,
-      tokensUsed: d?.usage?.total_tokens
-    };
-  } catch(e){ results.jsonTest = {error: e.message}; }
 
-  // Test 3: Rate limit headers
-  results.rateInfo = {
-    groqKeyPrefix: groqKey ? groqKey.substring(0,12)+"..." : "NOT SET",
-    timestamp: new Date().toISOString()
-  };
-
-  return res.status(200).json(results);
+  } catch (err) {
+    return res.status(200).json({ step: "FAIL — network error", error: err.message });
+  }
 }

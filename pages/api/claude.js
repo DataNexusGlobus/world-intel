@@ -11,13 +11,11 @@ export default async function handler(req, res) {
   const { prompt, maxTokens = 2000 } = req.body || {};
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
-  // gemini-2.5-flash with capped thinking budget:
-  // thinkingBudget:0 breaks tool use (search stops working)
-  // thinkingBudget unlimited = 5000+ tokens = 60s Vercel timeout
-  // thinkingBudget:1024 = enough for search decisions, fast enough to complete
+  // gemini-2.0-flash: 1500 req/day free (vs gemini-2.5-flash's 20/day limit)
+  // Full Google Search grounding, no thinking overhead, ~3-5s responses
   const outputTokens = maxTokens + 500;
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -25,7 +23,6 @@ export default async function handler(req, res) {
     generationConfig: {
       maxOutputTokens: outputTokens,
       temperature: 0.4,
-      thinkingConfig: { thinkingBudget: 1024 },
     },
   };
 

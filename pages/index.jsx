@@ -117,6 +117,25 @@ function _apiUrl(){
   return"/api/claude";
 }
 
+/* searchWeb — calls Tavily, returns a short context string to inject into Groq prompts
+   If Tavily key not set or fails, returns empty string (Groq falls back to WF block) */
+async function searchWeb(query){
+  try{
+    const res=await fetch("/api/search",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({query,maxResults:5})});
+    if(!res.ok)return "";
+    const d=await res.json();
+    if(d.error||!d.results)return "";
+    // Build compact context: answer summary + top snippets
+    const parts=[];
+    if(d.summary)parts.push("SEARCH SUMMARY: "+d.summary);
+    (d.results||[]).slice(0,3).forEach(r=>{
+      if(r.snippet)parts.push(`[${r.title}]: ${r.snippet}`);
+    });
+    return parts.join("\n").slice(0,1500); // cap at 1500 chars to save Groq tokens
+  }catch{return "";}
+}
+
 /* Global request queue — ensures max 1 Groq call every 4 seconds
    Prevents rate limit when user switches tabs quickly */
 let _lastCall=0;
@@ -669,8 +688,9 @@ async function fetchNews(q){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
 `${WF}
+${await searchWeb(`${q} breaking news today current events`)}
 
-Generate 8 relevant breaking news stories for "${q}" as of ${today}. Use the facts above for accuracy.
+Generate 8 relevant breaking news stories for "${q}" as of ${today}. Use SEARCH RESULTS above for real current events.
 Make stories specific and varied across politics, economy, military, trade, technology.
 
 Return ONLY a JSON array of 8 objects — no markdown, no text before or after:
@@ -703,10 +723,11 @@ async function fetchMarkets(country){
   const ref=getMRef(target);
   const raw=await callClaudeJSON(
 `${WF}
+${await searchWeb(`${target} stock market prices ${ex} today ${exIdx}`)}
 
 Generate stock market data for ${target}'s ${ex} (${exIdx}) as of ${today}.
 Use ONLY these exact tickers and company names: ${ref}
-Use stock prices from the WF context above where available.
+Use SEARCH RESULTS above for real current prices where available.
 
 Return JSON object with key "stocks" — array of exactly 5 items:
 {"stocks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","price":"${cur}PRICE","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VALUE","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VALUE","upside":"+12%","riskLevel":"LOW","whyNow":"specific reason","catalyst":"specific event","trend":"up"}]}
@@ -752,10 +773,11 @@ async function fetchStockPicks(country){
   const ref=getPRef(target);
   const raw=await callClaudeJSON(
 `${WF}
+${await searchWeb(`${target} stock picks analyst ratings best stocks ${exIdx} 2026`)}
 
 Investment analysis for ${target}'s ${ex} (${exIdx}) as of ${today}.
 Use ONLY these tickers and company names: ${ref}
-Use prices and rates from WF context above.
+Use SEARCH RESULTS above for real current prices and analyst sentiment.
 
 Return a JSON object with ALL fields filled with realistic values — no placeholder text:
 {"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":68,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"Two specific sentences about ${target} market right now.","macroFactors":["real factor 1","real factor 2","real factor 3"],"keyDrivers":["real driver 1","real driver 2"],"sectorRotation":{"leading":["sector1","sector2"],"lagging":["sector1","sector2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","currentPrice":"${cur}NUM","targetPrice1m":"${cur}NUM","targetPrice6m":"${cur}NUM","targetPrice1y":"${cur}NUM","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH CROSSOVER","volumeTrend":"INCREASING","supportLevel":"${cur}NUM","resistanceLevel":"${cur}NUM","stopLoss":"${cur}NUM","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25.4","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"Two specific sentences about why to buy this stock now.","tradingSetup":"One sentence trading setup.","catalysts":["real catalyst 1","real catalyst 2"],"risks":["real risk 1","real risk 2"],"newsDriver":"One sentence about recent news.","confidence":75,"timeframe":"Q2 2025"}]}
@@ -795,9 +817,10 @@ async function fetchIntel(country){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
 `${WF}
+${await searchWeb(`${t} geopolitical situation security threats political news 2026`)}
 
-Geopolitical intelligence briefing for ${t} as of ${today}. Use the facts above for leaders and events.
-Generate realistic, specific content about ${t} current situation.
+Geopolitical intelligence briefing for ${t} as of ${today}.
+Use SEARCH RESULTS above for real current events in ${t}.
 
 Return a single JSON object — no markdown:
 {"threatLevel":"elevated or high or moderate or low","stabilityIndex":68,"summary":"2-3 specific sentences about ${t} situation","alerts":[{"type":"political","level":"high","title":"Specific political event in ${t}","detail":"Specific detail"},{"type":"economic","level":"medium","title":"Economic issue in ${t}","detail":"Specific detail"},{"type":"military","level":"medium","title":"Security issue for ${t}","detail":"Specific detail"},{"type":"cyber","level":"low","title":"Cyber threat relevant to ${t}","detail":"Specific detail"}],"activeConflicts":["specific conflict 1","specific conflict 2"],"economicPressures":["specific pressure 1","pressure 2","pressure 3"],"cyberThreats":["specific threat 1","threat 2","threat 3"],"diplomaticAlerts":["specific alert 1","alert 2","alert 3"]}
@@ -820,13 +843,14 @@ async function fetchForecast(country){
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
 `${WF}
+${await searchWeb(`${t} economy GDP inflation interest rate 2026 economic forecast`)}
 
-Economic forecast for ${t} as of ${today}. Use the rates and market data from the facts above.
+Economic forecast for ${t} as of ${today}.
+Use SEARCH RESULTS above for real current GDP, inflation, interest rates for ${t}.
 
 Return a single JSON object — no markdown:
 {"country":"${t}","stability":68,"geopoliticalScore":65,"confidenceScore":72,"economicOutlook":"positive or neutral or negative or critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG or STABLE or WEAK or VOLATILE","sixMonthPrediction":"3 sentences about ${t} economic outlook","workingClassForecast":"2 sentences about jobs and cost of living in ${t}","marketOutlook":"2 sentences about ${t} stock market","traderOpportunities":"2 sentences about investment opportunities in ${t}","keyRisks":["specific risk 1","risk 2","risk 3"],"opportunities":["specific opportunity 1","opportunity 2","opportunity 3"],"basedOn":"real institutions for ${t}"}
-Use REAL values specific to ${t} — not generic placeholders. Every country must have unique numbers.
-India: stability=68,gdpGrowth=+7.1%,inflation=5.1%,interestRate=6.25%. USA: stability=72,gdpGrowth=+2.8%,inflation=3.0%,interestRate=4.25%. Russia: stability=35. China: stability=55,gdpGrowth=+5.0%.`,
+Use REAL values from search results. Every country must have unique numbers.`,
     "{",2000);
   const obj=pObj(raw);
   if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true;return obj;}

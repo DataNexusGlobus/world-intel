@@ -7,8 +7,21 @@ export default async function handler(req, res) {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY not set" });
 
-  const { prompt, maxTokens = 2000 } = req.body || {};
+  const { prompt, maxTokens = 2000, jsonMode = true } = req.body || {};
   if (!prompt) return res.status(400).json({ error: "prompt required" });
+
+  const body = {
+    model: "llama-3.3-70b-versatile",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: maxTokens,
+    temperature: 0.4,
+  };
+
+  // Only use json_object for JSON calls — NOT for news (which returns an array [])
+  // Groq's json_object mode forces {} objects and refuses to return arrays
+  if (jsonMode) {
+    body.response_format = { type: "json_object" };
+  }
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -17,13 +30,7 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: prompt }],
-        max_tokens: maxTokens,
-        temperature: 0.4,
-        response_format: { type: "json_object" },
-      }),
+      body: JSON.stringify(body),
     });
 
     const data = await response.json();
@@ -38,7 +45,9 @@ export default async function handler(req, res) {
     const text = data?.choices?.[0]?.message?.content || "";
     if (!text) return res.status(200).json({ text: "", error: "Empty response" });
 
-    return res.status(200).json({ text });
+    // Strip markdown fences just in case
+    const cleaned = text.replace(/^```(?:json)?\s*/i,"").replace(/\s*```\s*$/i,"").trim();
+    return res.status(200).json({ text: cleaned });
 
   } catch (err) {
     return res.status(500).json({ error: "Proxy failed: " + err.message });

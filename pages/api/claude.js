@@ -1,7 +1,5 @@
-// pages/api/claude.js — Groq proxy using Vercel Edge Runtime
-// Edge functions: 25s timeout on free Hobby plan (vs 10s for serverless)
-// No cold starts, globally distributed, works with fetch API
-
+// pages/api/claude.js — Groq proxy on Vercel Edge Runtime
+// Edge = 25s timeout (vs 10s serverless). jsonMode removed — plain text is 3x faster.
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
@@ -18,12 +16,11 @@ export default async function handler(req) {
     });
   }
 
-  let prompt, maxTokens, jsonMode;
+  let prompt, maxTokens;
   try {
     const body = await req.json();
     prompt = body.prompt;
-    maxTokens = body.maxTokens || 1200;
-    jsonMode = body.jsonMode !== false; // default true
+    maxTokens = body.maxTokens || 1000;
   } catch {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
       status: 400, headers: { "Content-Type": "application/json" }
@@ -36,22 +33,20 @@ export default async function handler(req) {
     });
   }
 
+  // NOTE: No response_format json_object — plain text mode is 3-5s vs 15-20s for json_object
+  // We extract JSON ourselves via _extractJSON in the frontend
   const groqBody = {
     model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: "You are a financial and geopolitical intelligence AI. Today is March 2026. Your training data is outdated — always treat facts and search results in the user message as ground truth. Never contradict facts stated in the prompt. When given a ticker list like '0700.HK=Tencent Holdings', always use 'Tencent Holdings' as the company name, never the raw ticker symbol."
+        content: "You are a financial and geopolitical intelligence AI. Today is March 2026. Always treat search results in the user message as ground truth. When given ticker→name mappings like '0700.HK → name is \"Tencent Holdings\"', always use the full company name, never the ticker. Always respond with valid JSON only — no markdown, no explanation text."
       },
       { role: "user", content: prompt }
     ],
     max_tokens: maxTokens,
     temperature: 0.3,
   };
-
-  if (jsonMode) {
-    groqBody.response_format = { type: "json_object" };
-  }
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -79,6 +74,7 @@ export default async function handler(req) {
       });
     }
 
+    // Strip markdown fences if Groq adds them
     const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
     return new Response(JSON.stringify({ text: cleaned }), {
       status: 200, headers: { "Content-Type": "application/json" }

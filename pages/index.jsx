@@ -136,7 +136,7 @@ async function searchWeb(query){
 let _lastCall=0;
 async function _throttle(){
   const now=Date.now();
-  const wait=Math.max(0,_lastCall+4000-now);
+  const wait=Math.max(0,_lastCall+1000-now);
   if(wait>0)await new Promise(r=>setTimeout(r,wait));
   _lastCall=Date.now();
 }
@@ -200,16 +200,18 @@ async function callClaude(prompt,maxTokens=2000,retries=2){
   return "";
 }
 
-/* callClaudeJSON — for structured data (returns object {}) — jsonMode:true forces clean JSON */
-async function callClaudeJSON(prompt,prefill="{",maxTokens=2500,retries=2){
+/* callClaudeJSON — uses jsonMode:false like news to avoid slow json_object mode
+   Groq's json_object mode takes 15-20s. Plain text mode takes 3-5s.
+   We handle JSON extraction ourselves via _extractJSON */
+async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2){
   const ck=_ck(prefill+":"+prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
-    if(i>0)await new Promise(r=>setTimeout(r,15000));
+    if(i>0)await new Promise(r=>setTimeout(r,8000));
     try{
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens,jsonMode:true})});
+        body:JSON.stringify({prompt,maxTokens,jsonMode:false})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";
@@ -1839,33 +1841,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
 
   useEffect(()=>{const id=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(id);},[]);
 
-  // PRELOAD: warm cache for India + USA silently on mount
-  // India first (majority of users are Indian), then USA
-  // 3s gap between each call to avoid Groq rate limits
-  // By the time user clicks any tab, data is already cached = instant load
-  useEffect(()=>{
-    const preload=async()=>{
-      const jobs=[
-        ()=>fetchNews("India"),
-        ()=>fetchNews("Global"),
-        ()=>fetchMarkets("India"),
-        ()=>fetchIntel("India"),
-        ()=>fetchForecast("India"),
-        ()=>fetchStockPicks("India"),
-        ()=>fetchNews("USA"),
-        ()=>fetchMarkets("USA"),
-        ()=>fetchIntel("USA"),
-        ()=>fetchForecast("USA"),
-        ()=>fetchStockPicks("USA"),
-      ];
-      for(let i=0;i<jobs.length;i++){
-        try{await jobs[i]();}catch(e){}
-        if(i<jobs.length-1)await new Promise(r=>setTimeout(r,3000));
-      }
-    };
-    const t=setTimeout(preload,2000); // wait 2s for auth/UI to settle
-    return()=>clearTimeout(t);
-  },[]); // eslint-disable-line
+  // Preload removed — was flooding Groq rate limits
 
   const tz=session.tz||Intl.DateTimeFormat().resolvedOptions().timeZone;
   const timeStr=new Intl.DateTimeFormat("en",{timeZone:tz,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date(clock));

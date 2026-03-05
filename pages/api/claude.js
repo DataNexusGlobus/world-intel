@@ -12,7 +12,13 @@ export default async function handler(req, res) {
 
   const body = {
     model: "llama-3.3-70b-versatile",
-    messages: [{ role: "user", content: prompt }],
+    messages: [
+      {
+        role: "system",
+        content: "You are a financial and geopolitical intelligence AI. Today is March 2026. Your training data may be outdated — always treat facts and search results provided in the user message as ground truth, even if they contradict your training. Never invent facts not present in the provided search results."
+      },
+      { role: "user", content: prompt }
+    ],
     max_tokens: maxTokens,
     temperature: 0.4,
   };

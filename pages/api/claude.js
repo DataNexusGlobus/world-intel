@@ -11,10 +11,11 @@ export default async function handler(req, res) {
   const { prompt, maxTokens = 2000 } = req.body || {};
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
-  // Gemini 2.5 Flash is a thinking model — thinking tokens count against output limit.
-  // thoughtsTokenCount can be 2000-4000 on its own, so we need a much higher ceiling.
-  // We request enough for thinking + actual JSON output.
-  const outputTokens = Math.max(maxTokens + 4000, 8000);
+  // Gemini 2.5 Flash is a thinking model — by default uses 5000+ thinking tokens
+  // which causes ~60 second responses and Vercel function timeouts.
+  // Setting thinkingBudget: 0 disables reasoning, drops latency to ~3 seconds.
+  // Google Search grounding still works fully with thinking disabled.
+  const outputTokens = maxTokens + 500;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
@@ -24,6 +25,7 @@ export default async function handler(req, res) {
     generationConfig: {
       maxOutputTokens: outputTokens,
       temperature: 0.4,
+      thinkingConfig: { thinkingBudget: 0 }, // disable thinking = fast responses
     },
   };
 
@@ -52,9 +54,9 @@ export default async function handler(req, res) {
       return res.status(200).json({ text: "", error: "Blocked: " + finishReason });
     }
 
-    // Filter out thought parts (p.thought === true) — only keep actual output text
+    // With thinkingBudget:0, all parts are regular text output (no thought parts)
     const text = candidate?.content?.parts
-      ?.filter(p => p.text && !p.thought)
+      ?.filter(p => p.text)
       ?.map(p => p.text)
       ?.join("") || "";
 

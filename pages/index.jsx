@@ -132,7 +132,7 @@ async function searchWeb(query){
     (d.results||[]).slice(0,3).forEach(r=>{
       if(r.snippet)parts.push(`[${r.title}]: ${r.snippet}`);
     });
-    return parts.join("\n").slice(0,1500); // cap at 1500 chars to save Groq tokens
+    return parts.join("\n").slice(0,800); // cap at 800 chars to save Groq tokens
   }catch{return "";}
 }
 
@@ -186,7 +186,7 @@ async function fetchRealPrices(stocks){
   }
 }
 
-/* callClaude — Gemini 2.5 Flash with Google Search grounding (all calls) */
+/* callClaude — for news (returns array []) — jsonMode:false so Groq allows arrays */
 async function callClaude(prompt,maxTokens=2000,retries=2){
   const ck=_ck(prompt);
   const h=_cg(ck);if(h)return h;
@@ -195,7 +195,7 @@ async function callClaude(prompt,maxTokens=2000,retries=2){
     try{
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens})});
+        body:JSON.stringify({prompt,maxTokens,jsonMode:false})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";
@@ -205,8 +205,7 @@ async function callClaude(prompt,maxTokens=2000,retries=2){
   return "";
 }
 
-/* callClaudeJSON — same as callClaude but prompts ask for JSON output
-   Gemini uses Google Search then returns JSON in text — we parse with _extractJSON */
+/* callClaudeJSON — for structured data (returns object {}) — jsonMode:true forces clean JSON */
 async function callClaudeJSON(prompt,prefill="{",maxTokens=2500,retries=2){
   const ck=_ck(prefill+":"+prompt);
   const h=_cg(ck);if(h)return h;
@@ -215,7 +214,7 @@ async function callClaudeJSON(prompt,prefill="{",maxTokens=2500,retries=2){
     try{
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens})});
+        body:JSON.stringify({prompt,maxTokens,jsonMode:true})});
       if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
       const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
       const t=d.text||"";

@@ -727,10 +727,14 @@ Return JSON, no markdown:
 {"stocks":[{"rank":1,"symbol":"TICKER","name":"COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VAL","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+12%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"}]}`,
     "{",800);
   const obj=pObj(raw);
+  // Normalize stocks key — 8b model sometimes returns "stock" or "Stocks"
+  if(obj&&!obj.stocks&&obj.stock)obj.stocks=Array.isArray(obj.stock)?obj.stock:[obj.stock];
+  if(obj&&!obj.stocks&&obj.Stocks)obj.stocks=obj.Stocks;
+  if(obj&&!obj.stocks&&obj.stockList)obj.stocks=obj.stockList;
   // Extract stocks array from wrapper object
   const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
   // Reject if company names look like tickers (e.g. "0700.HK" instead of "Tencent Holdings")
-  const hasRealNames=arr&&arr.length>=3&&arr[0]?.name&&arr[0].name.length>5&&!arr[0].name.includes(".");
+  const hasRealNames=arr&&arr.length>=1&&arr[0]?.name&&arr[0].name.length>=2&&!(/^[A-Z0-9]+\.[A-Z]{2}$/.test(arr[0].name));
   if(hasRealNames&&arr[0]?.symbol&&!/^LDR\d$/.test(arr[0].symbol)){
     // Normalize — Groq sometimes returns numbers as strings or vice versa
     const norm=arr.map(s=>({...s,
@@ -780,7 +784,7 @@ Return JSON with all fields filled — no placeholder text:
 All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentScore and fearGreedIndex must be integers 30-90.`,
     "{",2200);
   const obj=pObj(raw);
-  if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=3&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
+  if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
     // Normalize all pick fields to prevent render crashes
     obj.picks=obj.picks.filter(p=>p&&p.symbol&&p.rank).map(p=>({...p,
       rsi:parseInt(p.rsi)||55,
@@ -820,12 +824,23 @@ Return JSON, no markdown:
 {"threatLevel":"high|elevated|moderate|low","stabilityIndex":65,"summary":"2 sentences from search","alerts":[{"type":"political","level":"high","title":"event","detail":"detail"},{"type":"economic","level":"medium","title":"issue","detail":"detail"},{"type":"military","level":"medium","title":"issue","detail":"detail"},{"type":"cyber","level":"low","title":"threat","detail":"detail"}],"activeConflicts":["c1","c2"],"economicPressures":["p1","p2"],"cyberThreats":["t1","t2"],"diplomaticAlerts":["a1","a2"]}`,
     "{",800);
   const obj=pObj(raw);
-  if(obj&&obj.alerts&&obj.alerts.length>0){
-    // Normalize fields — Groq sometimes returns uppercase or string numbers
-    obj.threatLevel=(obj.threatLevel||"moderate").toLowerCase();
-    obj.stabilityIndex=parseInt(obj.stabilityIndex)||60;
-    obj.alerts=(obj.alerts||[]).map(a=>({...a,level:(a.level||"low").toLowerCase(),type:(a.type||"political").toLowerCase()}));
-    obj._isLive=true; _cs(_intelKey,obj); return obj;
+  if(obj){
+    // Normalize keys — 8b model returns inconsistent field names
+    if(!obj.alerts&&obj.alert)obj.alerts=[obj.alert];
+    if(!obj.alerts&&obj.Alerts)obj.alerts=obj.Alerts;
+    if(!obj.threatLevel&&obj.threat_level)obj.threatLevel=obj.threat_level;
+    if(!obj.threatLevel&&obj.ThreatLevel)obj.threatLevel=obj.ThreatLevel;
+    if(!obj.stabilityIndex&&obj.stability_index)obj.stabilityIndex=obj.stability_index;
+    if(!obj.stabilityIndex&&obj.stability)obj.stabilityIndex=obj.stability;
+    if(!obj.summary&&obj.Summary)obj.summary=obj.Summary;
+    if(!obj.activeConflicts&&obj.active_conflicts)obj.activeConflicts=obj.active_conflicts;
+    if(!obj.economicPressures&&obj.economic_pressures)obj.economicPressures=obj.economic_pressures;
+    if(obj.alerts||obj.summary||obj.threatLevel){
+      obj.threatLevel=(obj.threatLevel||"moderate").toLowerCase();
+      obj.stabilityIndex=parseInt(obj.stabilityIndex)||60;
+      obj.alerts=(obj.alerts||[]).map(a=>({...a,level:(a.level||"low").toLowerCase(),type:(a.type||"political").toLowerCase()}));
+      obj._isLive=true; _cs(_intelKey,obj); return obj;
+    }
   }
   const fb=fbIntel(t);fb._isLive=false;return fb;
 }
@@ -842,7 +857,17 @@ Return JSON, no markdown:
 {"country":"${t}","stability":65,"geopoliticalScore":65,"confidenceScore":70,"economicOutlook":"positive|neutral|negative|critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG|STABLE|WEAK|VOLATILE","sixMonthPrediction":"2 sentences","workingClassForecast":"1 sentence","marketOutlook":"1 sentence","traderOpportunities":"1 sentence","keyRisks":["r1","r2","r3"],"opportunities":["o1","o2","o3"],"basedOn":"sources"}`,
     "{",800);
   const obj=pObj(raw);
-  if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true; _cs(_fcKey,obj); return obj;}
+  if(obj){
+    // Normalize keys — 8b model returns inconsistent field names
+    if(!obj.gdpGrowth&&obj.gdp_growth)obj.gdpGrowth=obj.gdp_growth;
+    if(!obj.gdpGrowth&&obj.GDP_growth)obj.gdpGrowth=obj.GDP_growth;
+    if(!obj.gdpGrowth&&obj.gdp)obj.gdpGrowth=obj.gdp;
+    if(!obj.inflation&&obj.inflationRate)obj.inflation=obj.inflationRate;
+    if(!obj.interestRate&&obj.interest_rate)obj.interestRate=obj.interest_rate;
+    if(!obj.country)obj.country=t;
+    if(!obj.economicOutlook&&obj.outlook)obj.economicOutlook=obj.outlook;
+    if(obj.country||obj.gdpGrowth||obj.inflation){obj._isLive=true; _cs(_fcKey,obj); return obj;}
+  }
   const fb=fbForecast(t);fb._isLive=false;return fb;
 }
 

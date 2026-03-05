@@ -1,67 +1,77 @@
-// pages/api/diagnose.js — shows exactly what Groq returns for a real tab call
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
-  const apiKey = process.env.GROQ_API_KEY;
-  const tavilyKey = process.env.TAVILY_API_KEY;
+  const base = new URL(req.url).origin;
   const results = {};
 
-  // Step 1: Tavily search
-  let searchContext = "";
+  // Step 1: Call /api/search exactly like the frontend does
+  let searchText = "";
   try {
     const t1 = Date.now();
-    const tr = await fetch("https://api.tavily.com/search", {
+    const sr = await fetch(`${base}/api/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: tavilyKey, query: "USA stock market S&P500 today", max_results: 3, include_answer: true })
+      body: JSON.stringify({ query: "S&P 500 USA stocks today", maxResults: 3 })
     });
-    const td = await tr.json();
-    searchContext = (td.answer || "") + " " + (td.results||[]).map(r=>r.content?.slice(0,200)).join(" ");
-    results.tavily = { ok: tr.ok, ms: Date.now()-t1, contextLength: searchContext.length };
-  } catch(e) { results.tavily = { error: e.message }; }
+    const sd = await sr.json();
+    searchText = sd.summary || "";
+    results.search = { ok: sr.ok, ms: Date.now()-t1, summary: searchText.slice(0,100) };
+  } catch(e) { results.search = { error: e.message }; }
 
-  // Step 2: Groq with a simple markets prompt (same as real tab)
+  // Step 2: Call /api/claude exactly like callClaudeJSON does
   try {
     const t2 = Date.now();
-    const gr = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: "You are a financial AI. Respond with valid JSON only." },
-          { role: "user", content: `Today March 2026. Market data for USA NYSE.
-SEARCH: ${searchContext.slice(0,400)}
-Tickers→names: AAPL → name is "Apple Inc", MSFT → name is "Microsoft"
+    const prompt = `Today March 2026. Market data for USA NYSE (S&P 500).
+SEARCH: ${searchText.slice(0,400)}
+Tickers→names: AAPL → name is "Apple Inc", MSFT → name is "Microsoft Corp", NVDA → name is "NVIDIA Corp", AMZN → name is "Amazon.com", JPM → name is "JPMorgan Chase"
 Return JSON, no markdown:
-{"stocks":[{"rank":1,"symbol":"AAPL","name":"Apple Inc","sector":"Technology","price":"$230","change1d":"+0.5%","change1d_raw":0.5,"signal":"BUY","signalStrength":75}]}` }
-        ],
-        max_tokens: 400,
-        temperature: 0.3,
-      })
+{"stocks":[{"rank":1,"symbol":"AAPL","name":"Apple Inc","sector":"Technology","price":"$230.00","change1d":"+0.5%","change1d_raw":0.5,"change1w":"+1.2%","change1w_raw":1.2,"change1m":"+3.1%","change1m_raw":3.1,"volume":"55M","marketCap":"$3.5T","pe":"30.2","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"$260","upside":"+13%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"}]}`;
+
+    const cr = await fetch(`${base}/api/claude`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, maxTokens: 1000, jsonMode: false })
     });
-    const gd = await gr.json();
-    const raw = gd?.choices?.[0]?.message?.content || "";
-    results.groq = {
-      ok: gr.ok,
-      ms: Date.now()-t2,
-      status: gr.status,
-      rawResponse: raw,
-      rawLength: raw.length,
-      startsWithBrace: raw.trim().startsWith('{'),
-      startsWithBracket: raw.trim().startsWith('['),
-      error: gd?.error?.message,
-    };
-    // Try parsing
+    const cd = await cr.json();
+    const raw = cd.text || "";
+
+    // Simulate _extractJSON like the frontend does
+    let parsed = null;
+    let parseError = "";
     try {
-      const parsed = JSON.parse(raw.replace(/^```(?:json)?\s*/i,"").replace(/\s*```\s*$/i,"").trim());
-      results.groq.parsedOk = true;
-      results.groq.stockName = parsed?.stocks?.[0]?.name;
-    } catch(pe) {
-      results.groq.parsedOk = false;
-      results.groq.parseError = pe.message;
-    }
-  } catch(e) { results.groq = { error: e.message }; }
+      // Find outermost { }
+      let depth=0,start=-1,inStr=false,esc=false;
+      for(let i=0;i<raw.length;i++){
+        const ch=raw[i];
+        if(esc){esc=false;continue;}
+        if(ch==="\\" && inStr){esc=true;continue;}
+        if(ch==='"'){inStr=!inStr;continue;}
+        if(inStr)continue;
+        if(ch==='{'){if(depth===0)start=i;depth++;}
+        else if(ch==='}'){depth--;if(depth===0&&start!==-1){try{parsed=JSON.parse(raw.slice(start,i+1));}catch{}break;}}
+      }
+    } catch(e){ parseError = e.message; }
+
+    results.claude = {
+      ok: cr.ok,
+      ms: Date.now()-t2,
+      rawLength: raw.length,
+      rawFirst100: raw.slice(0,100),
+      rawLast50: raw.slice(-50),
+      parsedOk: !!parsed,
+      hasStocks: !!(parsed?.stocks),
+      stocksLength: parsed?.stocks?.length,
+      firstStockName: parsed?.stocks?.[0]?.name,
+      firstStockSymbol: parsed?.stocks?.[0]?.symbol,
+      parseError,
+      error: cd.error,
+    };
+  } catch(e) { results.claude = { error: e.message }; }
+
+  results.totalMs = (results.search?.ms||0) + (results.claude?.ms||0);
+  results.verdict = results.claude?.parsedOk && results.claude?.hasStocks
+    ? "SHOULD SHOW LIVE DATA ✅"
+    : "WILL SHOW ESTIMATED DATA ❌ — see claude result for why";
 
   return new Response(JSON.stringify(results, null, 2), {
     status: 200, headers: { "Content-Type": "application/json" }

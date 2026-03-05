@@ -683,16 +683,10 @@ async function fetchNews(q){
   const _newsCached=_cg(_newsKey);if(_newsCached)return _newsCached;
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
-`Today is ${today}. You are formatting real news search results into structured JSON.
-SEARCH RESULTS FROM THE WEB RIGHT NOW:
+`Today ${today}. News for "${q}". Use ONLY these search results:
 ${await searchWeb(`${q} breaking news today`)}
-
-Using ONLY the search results above, extract and format 8 news stories about "${q}".
-Do NOT use your training data for news content — only use what is in the search results above.
-If search results mention specific people, events, or facts — use exactly those.
-
-Return ONLY a JSON array of 8 objects — no markdown:
-[{"title":"headline from search results","source":"news outlet from results","country":"country","severity":"critical or high or medium or low","category":"conflict or military or cyber or economy or politics or trade or unrest or disaster","ago":"Xh ago","impact":"market or social impact","people":"who is affected","tradeEffect":"trade or market effect"}]`,1200);
+Return JSON array of 8 items, no markdown:
+[{"title":"headline","source":"outlet","country":"country","severity":"critical|high|medium|low","category":"conflict|military|cyber|economy|politics|trade|unrest|disaster","ago":"Xh ago","impact":"impact","people":"who","tradeEffect":"effect"}]`,800);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
     arr._isLive=true; _cs(_newsKey,arr); return arr;
@@ -724,19 +718,12 @@ async function fetchMarkets(country){
   // Convert "0700.HK=Tencent Holdings,9988.HK=Alibaba Group" into explicit instructions
   const ref=refRaw.split(",").map(r=>{const[sym,name]=r.split("=");return `${sym.trim()} → name is "${name.trim()}"`}).join(", ");
   const raw=await callClaudeJSON(
-`Today is ${today}. Use ONLY the search results below for current stock prices and news.
-
-LIVE WEB SEARCH RESULTS FOR ${target} MARKETS:
-${await searchWeb(`${exIdx} stock prices ${target} market today`)}
-
-Using search results above, generate market data for ${target}'s ${ex} (${exIdx}).
-Use ONLY these exact tickers and company names (do not invent others): ${ref}
-Extract real prices from search results where available.
-
-Return JSON with key "stocks" — array of exactly 5 items, no markdown:
-{"stocks":[{"rank":1,"symbol":"EXACT_TICKER_FROM_LIST","name":"EXACT_COMPANY_NAME_FROM_LIST","sector":"sector","price":"${cur}PRICE","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VALUE","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VALUE","upside":"+12%","riskLevel":"LOW","whyNow":"reason from search results","catalyst":"event from search results","trend":"up"}]}
-signalStrength: integer 55-92. Mix BUY/HOLD/SELL signals.`,
-    "{",1200);
+`Today ${today}. Market data for ${target} ${exIdx}. Use ONLY:
+${await searchWeb(`${exIdx} ${target} stocks today`)}
+Tickers→names: ${ref}
+Return JSON, no markdown:
+{"stocks":[{"rank":1,"symbol":"TICKER","name":"COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VAL","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+12%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"}]}`,
+    "{",800);
   const obj=pObj(raw);
   // Extract stocks array from wrapper object
   const arr=obj?.stocks||(Array.isArray(obj)?obj:null);
@@ -783,15 +770,10 @@ async function fetchStockPicks(country){
   const refRaw=getPRef(target);
   const ref=refRaw.split(",").map(r=>{const[sym,name]=r.split("=");return `${sym.trim()} → name is "${name.trim()}"`}).join(", ");
   const raw=await callClaudeJSON(
-`Today is ${today}. Use ONLY the search results below for current prices and analyst data.
-
-LIVE WEB SEARCH RESULTS FOR ${target} STOCKS:
-${await searchWeb(`${target} ${exIdx} stocks analyst rating buy sell 2026`)}
-
-Create investment analysis for ${target}'s ${ex} (${exIdx}) using search results above.
-Use ONLY these exact tickers and company names — do not use any others: ${ref}
-
-Return a JSON object with ALL fields filled — no placeholder text:
+`Today is ${today}. Investment analysis for ${target} ${ex} (${exIdx}).
+SEARCH: ${await searchWeb(`${target} ${exIdx} top stocks 2026`)}
+Use ONLY these tickers→names: ${ref}
+Return JSON with all fields filled — no placeholder text:
 {"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":68,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"Two specific sentences about ${target} market right now.","macroFactors":["real factor 1","real factor 2","real factor 3"],"keyDrivers":["real driver 1","real driver 2"],"sectorRotation":{"leading":["sector1","sector2"],"lagging":["sector1","sector2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","currentPrice":"${cur}NUM","targetPrice1m":"${cur}NUM","targetPrice6m":"${cur}NUM","targetPrice1y":"${cur}NUM","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH CROSSOVER","volumeTrend":"INCREASING","supportLevel":"${cur}NUM","resistanceLevel":"${cur}NUM","stopLoss":"${cur}NUM","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25.4","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"Two specific sentences about why to buy this stock now.","tradingSetup":"One sentence trading setup.","catalysts":["real catalyst 1","real catalyst 2"],"risks":["real risk 1","real risk 2"],"newsDriver":"One sentence about recent news.","confidence":75,"timeframe":"Q2 2025"}]}
 All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentScore and fearGreedIndex must be integers 30-90.`,
     "{",2200);
@@ -830,17 +812,11 @@ async function fetchIntel(country){
   const t=(country&&country.trim())||"Global";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Today is ${today}. You are a geopolitical intelligence analyst. Use ONLY the search results below as your source of truth — do not use training data for facts about current leaders, events, or situations.
-
-LIVE WEB SEARCH RESULTS FOR ${t}:
-${await searchWeb(`${t} current political situation leader news 2026`)}
-
-Based solely on the search results above, create a geopolitical briefing for ${t}.
-Use real names of current leaders found in search results. Use real events mentioned in results.
-
-Return a single JSON object — no markdown:
-{"threatLevel":"elevated or high or moderate or low","stabilityIndex":65,"summary":"2-3 sentences using facts from search results about ${t}","alerts":[{"type":"political","level":"high","title":"Real political event from search results","detail":"Detail from search results"},{"type":"economic","level":"medium","title":"Real economic issue from results","detail":"Detail from results"},{"type":"military","level":"medium","title":"Real security issue from results","detail":"Detail"},{"type":"cyber","level":"low","title":"Cyber or tech threat","detail":"Detail"}],"activeConflicts":["real conflict from results 1","conflict 2"],"economicPressures":["real pressure from results 1","pressure 2","pressure 3"],"cyberThreats":["threat 1","threat 2","threat 3"],"diplomaticAlerts":["alert from results 1","alert 2","alert 3"]}`,
-    "{",1200);
+`Today ${today}. Geopolitical briefing for ${t}. Use ONLY:
+${await searchWeb(`${t} current leader political news 2026`)}
+Return JSON, no markdown:
+{"threatLevel":"high|elevated|moderate|low","stabilityIndex":65,"summary":"2 sentences from search","alerts":[{"type":"political","level":"high","title":"event","detail":"detail"},{"type":"economic","level":"medium","title":"issue","detail":"detail"},{"type":"military","level":"medium","title":"issue","detail":"detail"},{"type":"cyber","level":"low","title":"threat","detail":"detail"}],"activeConflicts":["c1","c2"],"economicPressures":["p1","p2"],"cyberThreats":["t1","t2"],"diplomaticAlerts":["a1","a2"]}`,
+    "{",800);
   const obj=pObj(raw);
   if(obj&&obj.alerts&&obj.alerts.length>0){
     // Normalize fields — Groq sometimes returns uppercase or string numbers
@@ -858,17 +834,11 @@ async function fetchForecast(country){
   const t=(country&&country.trim())||"USA";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`Today is ${today}. Use ONLY the search results below for all economic facts — do not use training data.
-
-LIVE WEB SEARCH RESULTS FOR ${t} ECONOMY:
-${await searchWeb(`${t} GDP inflation interest rate unemployment 2026`)}
-
-Using the search results above, create an economic forecast for ${t}.
-Extract real numbers (GDP%, inflation%, interest rate%) directly from search results.
-
-Return a single JSON object — no markdown:
-{"country":"${t}","stability":65,"geopoliticalScore":65,"confidenceScore":70,"economicOutlook":"positive or neutral or negative or critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG or STABLE or WEAK or VOLATILE","sixMonthPrediction":"3 sentences based on search results","workingClassForecast":"2 sentences about jobs and living costs in ${t}","marketOutlook":"2 sentences about ${t} markets","traderOpportunities":"2 sentences about opportunities in ${t}","keyRisks":["risk from results 1","risk 2","risk 3"],"opportunities":["opportunity 1","opportunity 2","opportunity 3"],"basedOn":"institutions mentioned in search results for ${t}"}`,
-    "{",1200);
+`Today ${today}. Economic data for ${t}. Use ONLY:
+${await searchWeb(`${t} GDP inflation interest rate 2026`)}
+Return JSON, no markdown:
+{"country":"${t}","stability":65,"geopoliticalScore":65,"confidenceScore":70,"economicOutlook":"positive|neutral|negative|critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG|STABLE|WEAK|VOLATILE","sixMonthPrediction":"2 sentences","workingClassForecast":"1 sentence","marketOutlook":"1 sentence","traderOpportunities":"1 sentence","keyRisks":["r1","r2","r3"],"opportunities":["o1","o2","o3"],"basedOn":"sources"}`,
+    "{",800);
   const obj=pObj(raw);
   if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true; _cs(_fcKey,obj); return obj;}
   const fb=fbForecast(t);fb._isLive=false;return fb;

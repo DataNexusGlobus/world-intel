@@ -1,47 +1,47 @@
-// pages/api/test.js — TEMPORARY, delete after confirming everything works
-// Visit: https://world-intel-gamma.vercel.app/api/test
-
+// pages/api/test.js — deep diagnostic
 export default async function handler(req, res) {
   const groqKey = process.env.GROQ_API_KEY;
-  const finnhubKey = process.env.FINNHUB_API_KEY;
   const results = {};
 
-  // Test Groq
-  if (!groqKey) {
-    results.groq = { status: "FAIL", error: "GROQ_API_KEY not set in Vercel" };
-  } else {
-    try {
-      const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${groqKey}` },
-        body: JSON.stringify({ model: "llama-3.3-70b-versatile", messages: [{ role: "user", content: "Say hello in one word" }], max_tokens: 5 }),
-      });
-      const d = await r.json();
-      results.groq = r.ok
-        ? { status: "SUCCESS ✅", response: d?.choices?.[0]?.message?.content }
-        : { status: "FAIL ❌", error: d?.error?.message };
-    } catch (e) {
-      results.groq = { status: "FAIL ❌", error: e.message };
-    }
-  }
+  // Test 1: Basic call
+  try {
+    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
+      body: JSON.stringify({model:"llama-3.3-70b-versatile",messages:[{role:"user",content:"Who is the current US president as of March 2026?"}],max_tokens:50}),
+    });
+    const d = await r.json();
+    results.basicTest = {
+      status: r.status,
+      ok: r.ok,
+      response: d?.choices?.[0]?.message?.content,
+      error: d?.error?.message,
+      tokensUsed: d?.usage?.total_tokens
+    };
+  } catch(e){ results.basicTest = {error: e.message}; }
 
-  // Test Finnhub — fetch AAPL price
-  if (!finnhubKey) {
-    results.finnhub = { status: "FAIL — FINNHUB_API_KEY not set in Vercel", fix: "Add FINNHUB_API_KEY to Vercel Environment Variables" };
-  } else {
-    try {
-      const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${finnhubKey}`);
-      const d = await r.json();
-      results.finnhub = r.ok && d.c > 0
-        ? { status: "SUCCESS ✅", AAPL_price: `$${d.c}`, change: `${d.dp?.toFixed(2)}%` }
-        : { status: "FAIL ❌", error: "Invalid response", data: d };
-    } catch (e) {
-      results.finnhub = { status: "FAIL ❌", error: e.message };
-    }
-  }
+  // Test 2: JSON mode with small prompt
+  try {
+    const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {"Content-Type":"application/json","Authorization":`Bearer ${groqKey}`},
+      body: JSON.stringify({model:"llama-3.3-70b-versatile",messages:[{role:"user",content:'Return JSON: {"country":"India","gdpGrowth":"7.1%","president":"Narendra Modi"}'}],max_tokens:100,response_format:{type:"json_object"}}),
+    });
+    const d = await r.json();
+    results.jsonTest = {
+      status: r.status,
+      ok: r.ok,
+      response: d?.choices?.[0]?.message?.content,
+      error: d?.error?.message,
+      tokensUsed: d?.usage?.total_tokens
+    };
+  } catch(e){ results.jsonTest = {error: e.message}; }
 
-  return res.status(200).json({
-    summary: `Groq: ${results.groq?.status} | Finnhub: ${results.finnhub?.status}`,
-    ...results,
-  });
+  // Test 3: Rate limit headers
+  results.rateInfo = {
+    groqKeyPrefix: groqKey ? groqKey.substring(0,12)+"..." : "NOT SET",
+    timestamp: new Date().toISOString()
+  };
+
+  return res.status(200).json(results);
 }

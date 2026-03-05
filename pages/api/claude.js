@@ -11,14 +11,18 @@ export default async function handler(req, res) {
   const { prompt, maxTokens = 2000 } = req.body || {};
   if (!prompt) return res.status(400).json({ error: "prompt required" });
 
-  // Always use Google Search grounding — Gemini fetches real-time web data for every call
+  // Gemini 2.5 Flash is a thinking model — thinking tokens count against output limit.
+  // thoughtsTokenCount can be 2000-4000 on its own, so we need a much higher ceiling.
+  // We request enough for thinking + actual JSON output.
+  const outputTokens = Math.max(maxTokens + 4000, 8000);
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     tools: [{ googleSearch: {} }],
     generationConfig: {
-      maxOutputTokens: maxTokens,
+      maxOutputTokens: outputTokens,
       temperature: 0.4,
     },
   };
@@ -48,21 +52,27 @@ export default async function handler(req, res) {
       return res.status(200).json({ text: "", error: "Blocked: " + finishReason });
     }
 
+    // Filter out thought parts (p.thought === true) — only keep actual output text
     const text = candidate?.content?.parts
-      ?.filter(p => p.text)
+      ?.filter(p => p.text && !p.thought)
       ?.map(p => p.text)
       ?.join("") || "";
 
     if (!text) {
-      console.warn("Empty Gemini response:", JSON.stringify(data));
+      console.warn("Empty Gemini response, finishReason:", finishReason);
       return res.status(200).json({ text: "", error: "Empty response" });
     }
 
-    return res.status(200).json({ text });
+    // Strip markdown code fences — Gemini adds ```json ... ``` despite instructions
+    const cleaned = text
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/i, "")
+      .trim();
+
+    return res.status(200).json({ text: cleaned });
 
   } catch (err) {
     console.error("Proxy error:", err.message);
     return res.status(500).json({ error: "Proxy failed: " + err.message });
   }
 }
-

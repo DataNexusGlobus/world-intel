@@ -102,13 +102,8 @@ function _ck(p){return p.slice(0,120);}
 function _cg(k){const e=_MC.get(k);if(!e)return null;if(Date.now()-e.t>1800000){_MC.delete(k);return null;}return e.v;} // 30min cache
 function _cs(k,v){_MC.set(k,v);if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
 /* ── CURRENT WORLD FACTS — keeps Groq (Jan 2024 cutoff) generating accurate content ── */
-const WF=`CURRENT FACTS as of early 2026 (use these, do not contradict them):
-LEADERS: USA=Donald Trump (President since Jan 2025), India=Narendra Modi (PM), UK=Keir Starmer (PM), China=Xi Jinping, Russia=Vladimir Putin, Germany=Friedrich Merz (Chancellor since Feb 2025), Japan=Shigeru Ishiba (PM), France=Emmanuel Macron.
-MARKETS: S&P500~5800, Nikkei~38000, FTSE100~8600, DAX~21000, Sensex~75000, Hang Seng~22000.
-PRICES: AAPL~$230, NVDA~$115, MSFT~$415, AMZN~$225, META~$620, GOOGL~$175, TSLA~$290.
-INDIA: RELIANCE~₹1280, TCS~₹3900, HDFCBANK~₹1720, INFY~₹1850, ITC~₹430. RBI rate=6.25%.
-RATES: Fed=4.25%, ECB=2.65%, BoE=4.5%, RBI=6.25%, BoJ=0.5%.
-EVENTS: Russia-Ukraine war ongoing. Gaza conflict ongoing. US tariff tensions with China. AI boom driving tech stocks globally.`;
+/* WF block removed — Tavily now fetches all current facts dynamically.
+   No hardcoding needed. Groq receives real web search results as context. */
 
 
 
@@ -132,7 +127,7 @@ async function searchWeb(query){
     (d.results||[]).slice(0,3).forEach(r=>{
       if(r.snippet)parts.push(`[${r.title}]: ${r.snippet}`);
     });
-    return parts.join("\n").slice(0,800); // cap at 800 chars to save Groq tokens
+    return parts.join("\n").slice(0,1200); // enough context for accurate facts
   }catch{return "";}
 }
 
@@ -684,25 +679,30 @@ function pObj(raw){const r=_extractJSON(raw,"{","}");return r&&typeof r==="objec
 
 /* ── DATA FETCHERS ── */
 async function fetchNews(q){
+  const _newsKey="news:"+q;
+  const _newsCached=_cg(_newsKey);if(_newsCached)return _newsCached;
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaude(
-`${WF}
-SEARCH RESULTS (use for recent events only — WF facts above override any conflicting political info):
-${await searchWeb(`${q} news today March 2026`)}
+`Today is ${today}. You are formatting real news search results into structured JSON.
+SEARCH RESULTS FROM THE WEB RIGHT NOW:
+${await searchWeb(`${q} breaking news today`)}
 
-Generate 8 relevant breaking news stories for "${q}" as of ${today}. Use SEARCH RESULTS above for real current events.
-Make stories specific and varied across politics, economy, military, trade, technology.
+Using ONLY the search results above, extract and format 8 news stories about "${q}".
+Do NOT use your training data for news content — only use what is in the search results above.
+If search results mention specific people, events, or facts — use exactly those.
 
-Return ONLY a JSON array of 8 objects — no markdown, no text before or after:
-[{"title":"specific headline","source":"real outlet name","country":"country","severity":"critical or high or medium or low","category":"conflict or military or cyber or economy or politics or trade or unrest or disaster","ago":"Xh ago","impact":"specific market or social impact","people":"who is affected","tradeEffect":"trade or market effect"}]`,1800);
+Return ONLY a JSON array of 8 objects — no markdown:
+[{"title":"headline from search results","source":"news outlet from results","country":"country","severity":"critical or high or medium or low","category":"conflict or military or cyber or economy or politics or trade or unrest or disaster","ago":"Xh ago","impact":"market or social impact","people":"who is affected","tradeEffect":"trade or market effect"}]`,2000);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
-    arr._isLive=true; return arr;
+    arr._isLive=true; _cs(_newsKey,arr); return arr;
   }
   const fb=fbNews(q); fb._isLive=false; return fb;
 }
 
 async function fetchMarkets(country){
+  const _mktKey="mkt:"+country;
+  const _mktCached=_cg(_mktKey);if(_mktCached)return _mktCached;
   const target=(country&&country.trim())||"USA";
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
@@ -722,17 +722,18 @@ async function fetchMarkets(country){
   function getMRef(t){const tl=t.toLowerCase().replace(/\s+/g,"");return MKTREF[tl]||Object.entries(MKTREF).find(([k])=>tl.includes(k)||k.includes(tl))?.[1]||MKTREF.usa;}
   const ref=getMRef(target);
   const raw=await callClaudeJSON(
-`${WF}
-SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
-${await searchWeb(`${exIdx} index stocks price today March 2026`)}
+`Today is ${today}. Use ONLY the search results below for current stock prices and news.
 
-Generate stock market data for ${target}'s ${ex} (${exIdx}) as of ${today}.
-Use ONLY these exact tickers and company names: ${ref}
-Use SEARCH RESULTS above for real current prices where available.
+LIVE WEB SEARCH RESULTS FOR ${target} MARKETS:
+${await searchWeb(`${exIdx} stock prices ${target} market today`)}
 
-Return JSON object with key "stocks" — array of exactly 5 items:
-{"stocks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","price":"${cur}PRICE","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VALUE","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VALUE","upside":"+12%","riskLevel":"LOW","whyNow":"specific reason","catalyst":"specific event","trend":"up"}]}
-signalStrength must be integer 55-92. Mix signals: BUY, HOLD, SELL. No markdown.`,
+Using search results above, generate market data for ${target}'s ${ex} (${exIdx}).
+Use ONLY these exact tickers and company names (do not invent others): ${ref}
+Extract real prices from search results where available.
+
+Return JSON with key "stocks" — array of exactly 5 items, no markdown:
+{"stocks":[{"rank":1,"symbol":"EXACT_TICKER_FROM_LIST","name":"EXACT_COMPANY_NAME_FROM_LIST","sector":"sector","price":"${cur}PRICE","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VALUE","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VALUE","upside":"+12%","riskLevel":"LOW","whyNow":"reason from search results","catalyst":"event from search results","trend":"up"}]}
+signalStrength: integer 55-92. Mix BUY/HOLD/SELL signals.`,
     "{",1800);
   const obj=pObj(raw);
   // Extract stocks array from wrapper object
@@ -747,12 +748,14 @@ signalStrength must be integer 55-92. Mix signals: BUY, HOLD, SELL. No markdown.
     }));
     // Enrich with real Finnhub prices — gracefully degrades if unavailable
     const enriched=await fetchRealPrices(norm);
-    enriched._isLive=true; return enriched;
+    enriched._isLive=true; _cs(_mktKey,enriched); return enriched;
   }
   const fb=fbMarkets(target); fb._isLive=false; return fb;
 }
 
 async function fetchStockPicks(country){
+  const _pkKey="pk:"+country;
+  const _pkCached=_cg(_pkKey);if(_pkCached)return _pkCached;
   const target=(country&&country.trim())||"USA";
   const{ex,idx:exIdx,cur}=getEx(target);
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
@@ -773,15 +776,15 @@ async function fetchStockPicks(country){
   function getPRef(t){const tl=t.toLowerCase().replace(/\s+/g,"");return PKREF[tl]||Object.entries(PKREF).find(([k])=>tl.includes(k)||k.includes(tl))?.[1]||PKREF.usa;}
   const ref=getPRef(target);
   const raw=await callClaudeJSON(
-`${WF}
-SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
-${await searchWeb(`${target} top stocks ${exIdx} analyst buy rating 2026`)}
+`Today is ${today}. Use ONLY the search results below for current prices and analyst data.
 
-Investment analysis for ${target}'s ${ex} (${exIdx}) as of ${today}.
-Use ONLY these tickers and company names: ${ref}
-Use SEARCH RESULTS above for real current prices and analyst sentiment.
+LIVE WEB SEARCH RESULTS FOR ${target} STOCKS:
+${await searchWeb(`${target} ${exIdx} stocks analyst rating buy sell 2026`)}
 
-Return a JSON object with ALL fields filled with realistic values — no placeholder text:
+Create investment analysis for ${target}'s ${ex} (${exIdx}) using search results above.
+Use ONLY these exact tickers and company names — do not use any others: ${ref}
+
+Return a JSON object with ALL fields filled — no placeholder text:
 {"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":68,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"Two specific sentences about ${target} market right now.","macroFactors":["real factor 1","real factor 2","real factor 3"],"keyDrivers":["real driver 1","real driver 2"],"sectorRotation":{"leading":["sector1","sector2"],"lagging":["sector1","sector2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","currentPrice":"${cur}NUM","targetPrice1m":"${cur}NUM","targetPrice6m":"${cur}NUM","targetPrice1y":"${cur}NUM","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH CROSSOVER","volumeTrend":"INCREASING","supportLevel":"${cur}NUM","resistanceLevel":"${cur}NUM","stopLoss":"${cur}NUM","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25.4","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"Two specific sentences about why to buy this stock now.","tradingSetup":"One sentence trading setup.","catalysts":["real catalyst 1","real catalyst 2"],"risks":["real risk 1","real risk 2"],"newsDriver":"One sentence about recent news.","confidence":75,"timeframe":"Q2 2025"}]}
 All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentScore and fearGreedIndex must be integers 30-90.`,
     "{",2200);
@@ -809,26 +812,27 @@ All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentSco
       const pick=obj.picks.find(p=>p.symbol===ep.symbol);
       if(pick){pick.currentPrice=ep.price;pick.change1d=ep.change1d;pick._priceReal=true;}
     });
-    obj._isLive=true; return obj;
+    obj._isLive=true; _cs(_pkKey,obj); return obj;
   }
   const fb=fbPicks(target); fb._isLive=false; return fb;
 }
 
 async function fetchIntel(country){
+  const _intelKey="intel:"+(country||"Global");
+  const _intelCached=_cg(_intelKey);if(_intelCached)return _intelCached;
   const t=(country&&country.trim())||"Global";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`${WF}
-SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
-${await searchWeb(`${t} conflict economy news March 2026`)}
+`Today is ${today}. You are a geopolitical intelligence analyst. Use ONLY the search results below as your source of truth — do not use training data for facts about current leaders, events, or situations.
 
-Geopolitical intelligence briefing for ${t} as of ${today}.
-Use SEARCH RESULTS above for real current events in ${t}.
+LIVE WEB SEARCH RESULTS FOR ${t}:
+${await searchWeb(`${t} current political situation leader news 2026`)}
+
+Based solely on the search results above, create a geopolitical briefing for ${t}.
+Use real names of current leaders found in search results. Use real events mentioned in results.
 
 Return a single JSON object — no markdown:
-{"threatLevel":"elevated or high or moderate or low","stabilityIndex":68,"summary":"2-3 specific sentences about ${t} situation","alerts":[{"type":"political","level":"high","title":"Specific political event in ${t}","detail":"Specific detail"},{"type":"economic","level":"medium","title":"Economic issue in ${t}","detail":"Specific detail"},{"type":"military","level":"medium","title":"Security issue for ${t}","detail":"Specific detail"},{"type":"cyber","level":"low","title":"Cyber threat relevant to ${t}","detail":"Specific detail"}],"activeConflicts":["specific conflict 1","specific conflict 2"],"economicPressures":["specific pressure 1","pressure 2","pressure 3"],"cyberThreats":["specific threat 1","threat 2","threat 3"],"diplomaticAlerts":["specific alert 1","alert 2","alert 3"]}
-threatLevel: Russia/Middle East=high, China=elevated, India/USA/EU=moderate, UK/Japan=low.
-stabilityIndex integers: Russia=35, MiddleEast=30, China=55, India=68, USA=72, UK=75, Germany=74, Japan=78.`,
+{"threatLevel":"elevated or high or moderate or low","stabilityIndex":65,"summary":"2-3 sentences using facts from search results about ${t}","alerts":[{"type":"political","level":"high","title":"Real political event from search results","detail":"Detail from search results"},{"type":"economic","level":"medium","title":"Real economic issue from results","detail":"Detail from results"},{"type":"military","level":"medium","title":"Real security issue from results","detail":"Detail"},{"type":"cyber","level":"low","title":"Cyber or tech threat","detail":"Detail"}],"activeConflicts":["real conflict from results 1","conflict 2"],"economicPressures":["real pressure from results 1","pressure 2","pressure 3"],"cyberThreats":["threat 1","threat 2","threat 3"],"diplomaticAlerts":["alert from results 1","alert 2","alert 3"]}`,
     "{",2000);
   const obj=pObj(raw);
   if(obj&&obj.alerts&&obj.alerts.length>0){
@@ -836,28 +840,30 @@ stabilityIndex integers: Russia=35, MiddleEast=30, China=55, India=68, USA=72, U
     obj.threatLevel=(obj.threatLevel||"moderate").toLowerCase();
     obj.stabilityIndex=parseInt(obj.stabilityIndex)||60;
     obj.alerts=(obj.alerts||[]).map(a=>({...a,level:(a.level||"low").toLowerCase(),type:(a.type||"political").toLowerCase()}));
-    obj._isLive=true;return obj;
+    obj._isLive=true; _cs(_intelKey,obj); return obj;
   }
   const fb=fbIntel(t);fb._isLive=false;return fb;
 }
 
 async function fetchForecast(country){
+  const _fcKey="fc:"+(country||"USA");
+  const _fcCached=_cg(_fcKey);if(_fcCached)return _fcCached;
   const t=(country&&country.trim())||"USA";
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
   const raw=await callClaudeJSON(
-`${WF}
-SEARCH RESULTS (use for recent events/prices only — WF facts above override any conflicting political info):
-${await searchWeb(`${t} GDP growth rate inflation 2025 2026`)}
+`Today is ${today}. Use ONLY the search results below for all economic facts — do not use training data.
 
-Economic forecast for ${t} as of ${today}.
-Use SEARCH RESULTS above for real current GDP, inflation, interest rates for ${t}.
+LIVE WEB SEARCH RESULTS FOR ${t} ECONOMY:
+${await searchWeb(`${t} GDP inflation interest rate unemployment 2026`)}
+
+Using the search results above, create an economic forecast for ${t}.
+Extract real numbers (GDP%, inflation%, interest rate%) directly from search results.
 
 Return a single JSON object — no markdown:
-{"country":"${t}","stability":68,"geopoliticalScore":65,"confidenceScore":72,"economicOutlook":"positive or neutral or negative or critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG or STABLE or WEAK or VOLATILE","sixMonthPrediction":"3 sentences about ${t} economic outlook","workingClassForecast":"2 sentences about jobs and cost of living in ${t}","marketOutlook":"2 sentences about ${t} stock market","traderOpportunities":"2 sentences about investment opportunities in ${t}","keyRisks":["specific risk 1","risk 2","risk 3"],"opportunities":["specific opportunity 1","opportunity 2","opportunity 3"],"basedOn":"real institutions for ${t}"}
-Use REAL values from search results. Every country must have unique numbers.`,
+{"country":"${t}","stability":65,"geopoliticalScore":65,"confidenceScore":70,"economicOutlook":"positive or neutral or negative or critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG or STABLE or WEAK or VOLATILE","sixMonthPrediction":"3 sentences based on search results","workingClassForecast":"2 sentences about jobs and living costs in ${t}","marketOutlook":"2 sentences about ${t} markets","traderOpportunities":"2 sentences about opportunities in ${t}","keyRisks":["risk from results 1","risk 2","risk 3"],"opportunities":["opportunity 1","opportunity 2","opportunity 3"],"basedOn":"institutions mentioned in search results for ${t}"}`,
     "{",2000);
   const obj=pObj(raw);
-  if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true;return obj;}
+  if(obj&&obj.country&&obj.gdpGrowth){obj._isLive=true; _cs(_fcKey,obj); return obj;}
   const fb=fbForecast(t);fb._isLive=false;return fb;
 }
 

@@ -1,21 +1,47 @@
-// pages/api/claude.js — Groq proxy
-export const config = { maxDuration: 30 }; // extend Vercel timeout to 30s
+// pages/api/claude.js — Groq proxy using Vercel Edge Runtime
+// Edge functions: 25s timeout on free Hobby plan (vs 10s for serverless)
+// No cold starts, globally distributed, works with fetch API
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+export const config = { runtime: 'edge' };
+
+export default async function handler(req) {
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405, headers: { "Content-Type": "application/json" }
+    });
+  }
 
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "GROQ_API_KEY not set" });
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "GROQ_API_KEY not set" }), {
+      status: 500, headers: { "Content-Type": "application/json" }
+    });
+  }
 
-  const { prompt, maxTokens = 1500, jsonMode = true } = req.body || {};
-  if (!prompt) return res.status(400).json({ error: "prompt required" });
+  let prompt, maxTokens, jsonMode;
+  try {
+    const body = await req.json();
+    prompt = body.prompt;
+    maxTokens = body.maxTokens || 1200;
+    jsonMode = body.jsonMode !== false; // default true
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400, headers: { "Content-Type": "application/json" }
+    });
+  }
 
-  const body = {
+  if (!prompt) {
+    return new Response(JSON.stringify({ error: "prompt required" }), {
+      status: 400, headers: { "Content-Type": "application/json" }
+    });
+  }
+
+  const groqBody = {
     model: "llama-3.3-70b-versatile",
     messages: [
       {
         role: "system",
-        content: "You are a financial and geopolitical intelligence AI. Today is March 2026. Your training data is outdated — always treat facts and search results in the user message as ground truth. Never contradict facts stated in the prompt. When given a list like '0700.HK=Tencent Holdings', always use 'Tencent Holdings' as the company name, never the ticker symbol."
+        content: "You are a financial and geopolitical intelligence AI. Today is March 2026. Your training data is outdated — always treat facts and search results in the user message as ground truth. Never contradict facts stated in the prompt. When given a ticker list like '0700.HK=Tencent Holdings', always use 'Tencent Holdings' as the company name, never the raw ticker symbol."
       },
       { role: "user", content: prompt }
     ],
@@ -24,7 +50,7 @@ export default async function handler(req, res) {
   };
 
   if (jsonMode) {
-    body.response_format = { type: "json_object" };
+    groqBody.response_format = { type: "json_object" };
   }
 
   try {
@@ -34,25 +60,33 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(groqBody),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      return res.status(response.status).json({
+      return new Response(JSON.stringify({
         error: data?.error?.message || "Groq API error",
         groqStatus: response.status,
-      });
+      }), { status: response.status, headers: { "Content-Type": "application/json" } });
     }
 
     const text = data?.choices?.[0]?.message?.content || "";
-    if (!text) return res.status(200).json({ text: "", error: "Empty response" });
+    if (!text) {
+      return new Response(JSON.stringify({ text: "", error: "Empty response" }), {
+        status: 200, headers: { "Content-Type": "application/json" }
+      });
+    }
 
-    const cleaned = text.replace(/^```(?:json)?\s*/i,"").replace(/\s*```\s*$/i,"").trim();
-    return res.status(200).json({ text: cleaned });
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    return new Response(JSON.stringify({ text: cleaned }), {
+      status: 200, headers: { "Content-Type": "application/json" }
+    });
 
   } catch (err) {
-    return res.status(500).json({ error: "Proxy failed: " + err.message });
+    return new Response(JSON.stringify({ error: "Proxy failed: " + err.message }), {
+      status: 500, headers: { "Content-Type": "application/json" }
+    });
   }
 }

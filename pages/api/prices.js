@@ -59,21 +59,24 @@ export default async function handler(req) {
         if (!meta) return;
 
         // Current price — try multiple fields Yahoo might return
-        const price =
+        // parseFloat on each — Yahoo occasionally returns strings instead of numbers
+        const price = parseFloat(
           meta.regularMarketPrice ||       // most common
           meta.currentPrice ||             // sometimes used
           meta.postMarketPrice ||          // after hours
           meta.preMarketPrice ||           // pre market
-          null;
+          0
+        ) || null;
 
         if (!price || price <= 0) return;
 
-        // Previous close for change calculation
-        const prevClose =
+        // Previous close for change calculation — also parseFloat for safety
+        const prevClose = parseFloat(
           meta.chartPreviousClose ||
           meta.previousClose ||
           meta.regularMarketPreviousClose ||
-          null;
+          0
+        ) || null;
 
         // Change % — calculate ourselves or use Yahoo's value
         let change1d_raw = 0;

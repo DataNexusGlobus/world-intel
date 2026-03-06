@@ -2026,10 +2026,12 @@ export default function App(){
   const[session,setSess]=useState(undefined);
   const[cookie,setCookie]=useState(undefined);
   const[darkMode,setDarkMode]=useState(true);
+  const[mounted,setMounted]=useState(false); // prevents hydration mismatch
   const T=darkMode?DARK:LIGHT;
   const CSS=makeCSS(T,darkMode);
 
   useEffect(()=>{
+    setMounted(true); // mark as client-side mounted
     // Load theme + cookie from localStorage (unchanged)
     dbG(KC).then(c=>setCookie(c||null));
     dbG(KTH).then(th=>{if(th!==null&&th!==undefined)setDarkMode(!!th);});
@@ -2081,7 +2083,7 @@ export default function App(){
       }
     });
 
-    return()=>subscription?.unsubscribe();
+  return()=>subscription?.unsubscribe();
   },[]);
 
   async function handleLogin(s){setSess(s);}
@@ -2099,8 +2101,8 @@ export default function App(){
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous"/>
         <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><circle cx='24' cy='24' r='19' fill='%23001433'/><circle cx='24' cy='24' r='19' stroke='%231a8cff' stroke-width='1.6' fill='none'/><text x='24' y='30' text-anchor='middle' font-size='15' font-weight='900' fill='%23f5c400' font-family='Arial'>%24</text></svg>"/>
       </Head>
-      <div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <style>{CSS}</style>
+      <div suppressHydrationWarning style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <style suppressHydrationWarning>{CSS}</style>
         <div style={{textAlign:"center",animation:"fadeUp .4s ease"}}>
           <LogoSVG size={56}/>
           <div style={{fontFamily:"'Orbitron',monospace",fontSize:18,fontWeight:900,background:`linear-gradient(135deg,${T.cyan},${T.purple})`,WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",letterSpacing:".1em",marginTop:12,marginBottom:16}}>WORLD INTEL</div>
@@ -2110,6 +2112,9 @@ export default function App(){
       </>
     );
   }
+
+  // Prevent hydration mismatch — render nothing until client mounts
+  if(!mounted)return null;
 
   return(
     <><Head>

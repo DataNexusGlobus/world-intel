@@ -191,11 +191,16 @@ async function callClaude(prompt,maxTokens=2000,retries=2){
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompt,maxTokens,jsonMode:false})});
-      if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
-      const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
+      if(!res.ok){
+        const eb=await res.json().catch(()=>({}));
+        console.error("[callClaude] Groq error",res.status,eb?.error||"");
+        if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";
+      }
+      const d=await res.json();
+      if(d.error){console.error("[callClaude] API error:",d.error);if(i<retries-1)continue;return "";}
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
-    }catch{if(i<retries-1)continue;return "";}
+    }catch(e){console.error("[callClaude] Exception:",e.message);if(i<retries-1)continue;return "";}
   }
   return "";
 }
@@ -212,11 +217,16 @@ async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2){
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompt,maxTokens,jsonMode:false})});
-      if(!res.ok){if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";}
-      const d=await res.json();if(d.error&&i<retries-1)continue;if(d.error)return "";
+      if(!res.ok){
+        const eb=await res.json().catch(()=>({}));
+        console.error("[callClaudeJSON] Groq error",res.status,eb?.error||"",eb?.groqType||"");
+        if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";
+      }
+      const d=await res.json();
+      if(d.error){console.error("[callClaudeJSON] API error:",d.error);if(i<retries-1)continue;return "";}
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
-    }catch{if(i<retries-1)continue;return "";}
+    }catch(e){console.error("[callClaudeJSON] Exception:",e.message);if(i<retries-1)continue;return "";}
   }
   return "";
 }

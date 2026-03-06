@@ -141,43 +141,45 @@ async function _throttle(){
   _lastCall=Date.now();
 }
 
-/* fetchRealPrices — enriches Groq stock data with real prices from Finnhub
-   Gracefully degrades: if Finnhub unavailable, Groq prices are kept */
+/* fetchRealPrices — enriches Groq stock data with real prices from Yahoo Finance
+   Supports ALL global exchanges: NSE India, LSE UK, HKEX, TSE Japan etc.
+   Liberal approach: accept any valid positive price from Yahoo, no strict ratio check.
+   Gracefully degrades: if Yahoo fails for any symbol, Groq estimate is kept. */
 async function fetchRealPrices(stocks){
   try{
     const symbols=stocks.map(s=>s.symbol).filter(Boolean);
+    if(symbols.length===0)return stocks;
     const res=await fetch("/api/prices",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({symbols})});
+    // If prices API fails entirely — return original Groq data unchanged
     if(!res.ok)return stocks;
-    const{prices}=await res.json();
-    if(!prices||Object.keys(prices).length===0)return stocks;
-    // Merge real prices into stocks — keep all Groq analysis fields
+    let prices={};
+    try{const d=await res.json();prices=d?.prices||{};}catch{return stocks;}
+    if(Object.keys(prices).length===0)return stocks;
+    // Merge Yahoo prices into stocks — keep ALL Groq analysis fields
     return stocks.map(s=>{
       const p=prices[s.symbol];
-      if(!p||!p.isReal)return s;
-      // Sanity check: extract Groq's estimated price number for comparison
-      const groqPriceNum=parseFloat((s.price||s.currentPrice||"0").replace(/[^0-9.]/g,""));
-      // If Finnhub price is wildly different (>5x or <0.2x of Groq estimate), skip it
-      // This catches stale/wrong data for non-US exchanges
-      if(groqPriceNum>0){
-        const ratio=p.price/groqPriceNum;
-        if(ratio>5||ratio<0.2)return s; // Finnhub data unreliable for this exchange
-      }
-      // Format price with original currency prefix
-      const cur=(s.price||s.currentPrice||"").replace(/[\d.,]+.*/,"").trim();
-      const formatted=cur+(p.price.toFixed(2));
+      // If Yahoo didn't return this symbol — keep Groq data
+      if(!p||!p.isReal||!p.price||p.price<=0)return s;
+      // Extract currency prefix from Groq's price string (₹, £, $, ¥, €, A$, C$ etc.)
+      // Be liberal — take everything before the first digit
+      const groqPriceStr=s.price||s.currentPrice||"";
+      const cur=groqPriceStr.match(/^[^0-9]*/)?.[0]||"";
+      // Format Yahoo price with same currency prefix
+      const formatted=cur+p.price.toLocaleString("en-IN",{maximumFractionDigits:2});
       const ch=p.change1d_raw||0;
+      const chStr=ch>=0?`+${ch.toFixed(2)}%`:`${ch.toFixed(2)}%`;
       return{...s,
         price:formatted,
         currentPrice:formatted,
-        change1d:ch>=0?`+${ch.toFixed(2)}%`:`${ch.toFixed(2)}%`,
+        change1d:chStr,
         change1d_raw:ch,
         _priceReal:true,
       };
     });
   }catch{
-    return stocks; // silent fallback — Groq prices used
+    return stocks; // silent fallback — Groq prices used if anything goes wrong
   }
 }
 
@@ -737,8 +739,9 @@ async function fetchMarkets(country){
 `Today ${today}. Return market data for EXACTLY 5 stocks for ${target} ${exIdx}.
 SEARCH: ${await searchWeb(`${exIdx} ${target} stocks today`)}
 Use ALL 5 of these tickers (one entry per ticker): ${ref}
+IMPORTANT: Replace PRICE with actual current stock prices. Replace REAL_REASON/REAL_EVENT with real analysis.
 Return JSON with "stocks" array containing ALL 5 entries. Each entry needs ALL fields.
-{"stocks":[{"rank":1,"symbol":"T1","name":"Name1","sector":"s","price":"${cur}0","change1d":"+0.5%","change1d_raw":0.5,"change1w":"+1%","change1w_raw":1,"change1m":"+3%","change1m_raw":3,"volume":"10M","marketCap":"${cur}1B","pe":"25","signal":"BUY","signalStrength":72,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+10%","riskLevel":"LOW","whyNow":"reason","catalyst":"event","trend":"up"},{"rank":2,"symbol":"T2","name":"Name2","sector":"s","price":"${cur}0","change1d":"-0.3%","change1d_raw":-0.3,"change1w":"+0.8%","change1w_raw":0.8,"change1m":"+2%","change1m_raw":2,"volume":"8M","marketCap":"${cur}1B","pe":"20","signal":"HOLD","signalStrength":55,"shortTerm":"NEUTRAL","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+7%","riskLevel":"MEDIUM","whyNow":"reason","catalyst":"event","trend":"stable"},{"rank":3,"symbol":"T3","name":"Name3","sector":"s","price":"${cur}0","change1d":"+1%","change1d_raw":1,"change1w":"+2%","change1w_raw":2,"change1m":"+5%","change1m_raw":5,"volume":"15M","marketCap":"${cur}1B","pe":"30","signal":"BUY","signalStrength":80,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+12%","riskLevel":"LOW","whyNow":"reason","catalyst":"event","trend":"up"},{"rank":4,"symbol":"T4","name":"Name4","sector":"s","price":"${cur}0","change1d":"-1%","change1d_raw":-1,"change1w":"-0.5%","change1w_raw":-0.5,"change1m":"+1%","change1m_raw":1,"volume":"5M","marketCap":"${cur}1B","pe":"18","signal":"SELL","signalStrength":35,"shortTerm":"BEARISH","longTerm":"NEUTRAL","targetPrice":"${cur}0","upside":"-5%","riskLevel":"HIGH","whyNow":"reason","catalyst":"event","trend":"down"},{"rank":5,"symbol":"T5","name":"Name5","sector":"s","price":"${cur}0","change1d":"+0.2%","change1d_raw":0.2,"change1w":"+1.5%","change1w_raw":1.5,"change1m":"+4%","change1m_raw":4,"volume":"12M","marketCap":"${cur}1B","pe":"22","signal":"BUY","signalStrength":65,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+9%","riskLevel":"LOW","whyNow":"reason","catalyst":"event","trend":"up"}]}`,
+{"stocks":[{"rank":1,"symbol":"T1","name":"Name1","sector":"s","price":"${cur}PRICE","change1d":"+0.5%","change1d_raw":0.5,"change1w":"+1%","change1w_raw":1,"change1m":"+3%","change1m_raw":3,"volume":"10M","marketCap":"${cur}1B","pe":"25","signal":"BUY","signalStrength":72,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}PRICE","upside":"+10%","riskLevel":"LOW","whyNow":"REAL_REASON","catalyst":"REAL_EVENT","trend":"up"},{"rank":2,"symbol":"T2","name":"Name2","sector":"s","price":"${cur}PRICE","change1d":"-0.3%","change1d_raw":-0.3,"change1w":"+0.8%","change1w_raw":0.8,"change1m":"+2%","change1m_raw":2,"volume":"8M","marketCap":"${cur}1B","pe":"20","signal":"HOLD","signalStrength":55,"shortTerm":"NEUTRAL","longTerm":"BULLISH","targetPrice":"${cur}PRICE","upside":"+7%","riskLevel":"MEDIUM","whyNow":"REAL_REASON","catalyst":"REAL_EVENT","trend":"stable"},{"rank":3,"symbol":"T3","name":"Name3","sector":"s","price":"${cur}PRICE","change1d":"+1%","change1d_raw":1,"change1w":"+2%","change1w_raw":2,"change1m":"+5%","change1m_raw":5,"volume":"15M","marketCap":"${cur}1B","pe":"30","signal":"BUY","signalStrength":80,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}PRICE","upside":"+12%","riskLevel":"LOW","whyNow":"REAL_REASON","catalyst":"REAL_EVENT","trend":"up"},{"rank":4,"symbol":"T4","name":"Name4","sector":"s","price":"${cur}PRICE","change1d":"-1%","change1d_raw":-1,"change1w":"-0.5%","change1w_raw":-0.5,"change1m":"+1%","change1m_raw":1,"volume":"5M","marketCap":"${cur}1B","pe":"18","signal":"SELL","signalStrength":35,"shortTerm":"BEARISH","longTerm":"NEUTRAL","targetPrice":"${cur}PRICE","upside":"-5%","riskLevel":"HIGH","whyNow":"REAL_REASON","catalyst":"REAL_EVENT","trend":"down"},{"rank":5,"symbol":"T5","name":"Name5","sector":"s","price":"${cur}PRICE","change1d":"+0.2%","change1d_raw":0.2,"change1w":"+1.5%","change1w_raw":1.5,"change1m":"+4%","change1m_raw":4,"volume":"12M","marketCap":"${cur}1B","pe":"22","signal":"BUY","signalStrength":65,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}PRICE","upside":"+9%","riskLevel":"LOW","whyNow":"REAL_REASON","catalyst":"REAL_EVENT","trend":"up"}]}`,
     "{",1200,2,`mkt:${target}:${_todayKey()}`);
   const obj=pObj(raw);
   // Normalize stocks key — 8b model sometimes returns "stock" or "Stocks"
@@ -792,8 +795,9 @@ async function fetchStockPicks(country){
   const raw=await callClaudeJSON(
 `Today is ${today}. Return investment picks for ALL 5 of: ${ref}
 SEARCH: ${await searchWeb(`${target} ${exIdx} top stocks 2026`)}
+IMPORTANT: Replace PRICE with actual current stock prices from search. Replace REAL_THESIS/REAL_SETUP/REAL_NEWS with real analysis sentences.
 Return JSON with ALL 5 in picks array:
-{"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":65,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"2 sentences about ${target} market.","macroFactors":["factor1","factor2","factor3"],"keyDrivers":["driver1","driver2"],"sectorRotation":{"leading":["s1","s2"],"lagging":["s1","s2"]},"picks":[{"rank":1,"symbol":"T1","name":"Company1","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"2 sentences why buy.","tradingSetup":"1 sentence setup.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence news.","confidence":75,"timeframe":"Q2 2026"},{"rank":2,"symbol":"T2","name":"Company2","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+5%","upside6m":"+10%","upside1y":"+18%","signal":"HOLD","tradingSignal":"HOLD","investmentSignal":"BUY","rsi":52,"maSignal":"NEUTRAL","volumeTrend":"STABLE","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:1.8","volatility":"MEDIUM","beta":0.9,"pe":"20","epsGrowth":"+12%","revenueGrowth":"+8%","debtEquity":"0.45","dividendYield":"2.5%","institutionalOwnership":"65%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":65,"timeframe":"Q3 2026"},{"rank":3,"symbol":"T3","name":"Company3","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+10%","upside6m":"+20%","upside1y":"+30%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":62,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:3","volatility":"LOW","beta":1.2,"pe":"35","epsGrowth":"+25%","revenueGrowth":"+18%","debtEquity":"0.2","dividendYield":"0.8%","institutionalOwnership":"78%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":80,"timeframe":"Q2 2026"},{"rank":4,"symbol":"T4","name":"Company4","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"-3%","upside6m":"+5%","upside1y":"+12%","signal":"SELL","tradingSignal":"SELL","investmentSignal":"HOLD","rsi":45,"maSignal":"BEARISH","volumeTrend":"DECREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:1.2","volatility":"HIGH","beta":1.5,"pe":"15","epsGrowth":"+5%","revenueGrowth":"+3%","debtEquity":"0.8","dividendYield":"3.5%","institutionalOwnership":"55%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":50,"timeframe":"Q4 2026"},{"rank":5,"symbol":"T5","name":"Company5","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+6%","upside6m":"+12%","upside1y":"+22%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":55,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:2","volatility":"MEDIUM","beta":1.0,"pe":"28","epsGrowth":"+15%","revenueGrowth":"+10%","debtEquity":"0.35","dividendYield":"1.5%","institutionalOwnership":"70%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":70,"timeframe":"Q3 2026"}]}`,
+{"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":65,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"2 sentences about ${target} market.","macroFactors":["factor1","factor2","factor3"],"keyDrivers":["driver1","driver2"],"sectorRotation":{"leading":["s1","s2"],"lagging":["s1","s2"]},"picks":[{"rank":1,"symbol":"T1","name":"Company1","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"REAL_THESIS_WHY_BUY","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":75,"timeframe":"Q2 2026"},{"rank":2,"symbol":"T2","name":"Company2","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+5%","upside6m":"+10%","upside1y":"+18%","signal":"HOLD","tradingSignal":"HOLD","investmentSignal":"BUY","rsi":52,"maSignal":"NEUTRAL","volumeTrend":"STABLE","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:1.8","volatility":"MEDIUM","beta":0.9,"pe":"20","epsGrowth":"+12%","revenueGrowth":"+8%","debtEquity":"0.45","dividendYield":"2.5%","institutionalOwnership":"65%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":65,"timeframe":"Q3 2026"},{"rank":3,"symbol":"T3","name":"Company3","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+10%","upside6m":"+20%","upside1y":"+30%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":62,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:3","volatility":"LOW","beta":1.2,"pe":"35","epsGrowth":"+25%","revenueGrowth":"+18%","debtEquity":"0.2","dividendYield":"0.8%","institutionalOwnership":"78%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":80,"timeframe":"Q2 2026"},{"rank":4,"symbol":"T4","name":"Company4","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"-3%","upside6m":"+5%","upside1y":"+12%","signal":"SELL","tradingSignal":"SELL","investmentSignal":"HOLD","rsi":45,"maSignal":"BEARISH","volumeTrend":"DECREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:1.2","volatility":"HIGH","beta":1.5,"pe":"15","epsGrowth":"+5%","revenueGrowth":"+3%","debtEquity":"0.8","dividendYield":"3.5%","institutionalOwnership":"55%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":50,"timeframe":"Q4 2026"},{"rank":5,"symbol":"T5","name":"Company5","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+6%","upside6m":"+12%","upside1y":"+22%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":55,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:2","volatility":"MEDIUM","beta":1.0,"pe":"28","epsGrowth":"+15%","revenueGrowth":"+10%","debtEquity":"0.35","dividendYield":"1.5%","institutionalOwnership":"70%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":70,"timeframe":"Q3 2026"}]}`,
     "{",3000,2,`pk:${target}:${_todayKey()}`);
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){

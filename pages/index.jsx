@@ -182,7 +182,7 @@ async function fetchRealPrices(stocks){
 }
 
 /* callClaude — for news (returns array []) — jsonMode:false so Groq allows arrays */
-async function callClaude(prompt,maxTokens=2000,retries=2){
+async function callClaude(prompt,maxTokens=2000,retries=2,cacheKey=null){
   const ck=_ck(prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
@@ -190,7 +190,7 @@ async function callClaude(prompt,maxTokens=2000,retries=2){
     try{
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens,jsonMode:false})});
+        body:JSON.stringify({prompt,maxTokens,jsonMode:false,cacheKey})});
       if(!res.ok){
         const eb=await res.json().catch(()=>({}));
         console.error("[callClaude] Groq error",res.status,eb?.error||"");
@@ -208,7 +208,7 @@ async function callClaude(prompt,maxTokens=2000,retries=2){
 /* callClaudeJSON — uses jsonMode:false like news to avoid slow json_object mode
    Groq's json_object mode takes 15-20s. Plain text mode takes 3-5s.
    We handle JSON extraction ourselves via _extractJSON */
-async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2){
+async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2,cacheKey=null){
   const ck=_ck(prefill+":"+prompt);
   const h=_cg(ck);if(h)return h;
   for(let i=0;i<retries;i++){
@@ -216,7 +216,7 @@ async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2){
     try{
       await _throttle();
       const res=await fetch(_apiUrl(),{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt,maxTokens,jsonMode:false})});
+        body:JSON.stringify({prompt,maxTokens,jsonMode:false,cacheKey})});
       if(!res.ok){
         const eb=await res.json().catch(()=>({}));
         console.error("[callClaudeJSON] Groq error",res.status,eb?.error||"",eb?.groqType||"");
@@ -690,15 +690,19 @@ function pArr(raw){const r=_extractJSON(raw,"[","]");return Array.isArray(r)?r:n
 function pObj(raw){const r=_extractJSON(raw,"{","}");return r&&typeof r==="object"&&!Array.isArray(r)?r:null;}
 
 /* ── DATA FETCHERS ── */
+// Server cache key uses today's date so data auto-refreshes each day
+function _todayKey(){return new Date().toISOString().slice(0,10);} // "2026-03-07"
+
 async function fetchNews(q){
   const _newsKey="news:"+q;
   const _newsCached=_cg(_newsKey);if(_newsCached)return _newsCached;
   const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+  const sck=`news:${q}:${_todayKey()}`;
   const raw=await callClaude(
 `Today ${today}. News for "${q}". Use ONLY these search results:
 ${await searchWeb(`${q} breaking news today`)}
 Return JSON array of 8 items, no markdown:
-[{"title":"headline","source":"outlet","country":"country","severity":"critical|high|medium|low","category":"conflict|military|cyber|economy|politics|trade|unrest|disaster","ago":"Xh ago","impact":"impact","people":"who","tradeEffect":"effect"}]`,800);
+[{"title":"headline","source":"outlet","country":"country","severity":"critical|high|medium|low","category":"conflict|military|cyber|economy|politics|trade|unrest|disaster","ago":"Xh ago","impact":"impact","people":"who","tradeEffect":"effect"}]`,800,2,sck);
   const arr=pArr(raw);
   if(arr&&arr.length>0&&arr[0].title&&arr[0].title.length>10){
     arr._isLive=true; _cs(_newsKey,arr); return arr;
@@ -735,7 +739,7 @@ SEARCH: ${await searchWeb(`${exIdx} ${target} stocks today`)}
 Use ALL 5 of these tickers (one entry per ticker): ${ref}
 Return JSON with "stocks" array containing ALL 5 entries. Each entry needs ALL fields.
 {"stocks":[{"rank":1,"symbol":"T1","name":"Name1","sector":"s","price":"${cur}0","change1d":"+0.5%","change1d_raw":0.5,"change1w":"+1%","change1w_raw":1,"change1m":"+3%","change1m_raw":3,"volume":"10M","marketCap":"${cur}1B","pe":"25","signal":"BUY","signalStrength":72,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+10%","riskLevel":"LOW","whyNow":"reason","catalyst":"event","trend":"up"},{"rank":2,"symbol":"T2","name":"Name2","sector":"s","price":"${cur}0","change1d":"-0.3%","change1d_raw":-0.3,"change1w":"+0.8%","change1w_raw":0.8,"change1m":"+2%","change1m_raw":2,"volume":"8M","marketCap":"${cur}1B","pe":"20","signal":"HOLD","signalStrength":55,"shortTerm":"NEUTRAL","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+7%","riskLevel":"MEDIUM","whyNow":"reason","catalyst":"event","trend":"stable"},{"rank":3,"symbol":"T3","name":"Name3","sector":"s","price":"${cur}0","change1d":"+1%","change1d_raw":1,"change1w":"+2%","change1w_raw":2,"change1m":"+5%","change1m_raw":5,"volume":"15M","marketCap":"${cur}1B","pe":"30","signal":"BUY","signalStrength":80,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+12%","riskLevel":"LOW","whyNow":"reason","catalyst":"event","trend":"up"},{"rank":4,"symbol":"T4","name":"Name4","sector":"s","price":"${cur}0","change1d":"-1%","change1d_raw":-1,"change1w":"-0.5%","change1w_raw":-0.5,"change1m":"+1%","change1m_raw":1,"volume":"5M","marketCap":"${cur}1B","pe":"18","signal":"SELL","signalStrength":35,"shortTerm":"BEARISH","longTerm":"NEUTRAL","targetPrice":"${cur}0","upside":"-5%","riskLevel":"HIGH","whyNow":"reason","catalyst":"event","trend":"down"},{"rank":5,"symbol":"T5","name":"Name5","sector":"s","price":"${cur}0","change1d":"+0.2%","change1d_raw":0.2,"change1w":"+1.5%","change1w_raw":1.5,"change1m":"+4%","change1m_raw":4,"volume":"12M","marketCap":"${cur}1B","pe":"22","signal":"BUY","signalStrength":65,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}0","upside":"+9%","riskLevel":"LOW","whyNow":"reason","catalyst":"event","trend":"up"}]}`,
-    "{",1200);
+    "{",1200,2,`mkt:${target}:${_todayKey()}`);
   const obj=pObj(raw);
   // Normalize stocks key — 8b model sometimes returns "stock" or "Stocks"
   if(obj&&!obj.stocks&&obj.stock)obj.stocks=Array.isArray(obj.stock)?obj.stock:[obj.stock];
@@ -790,7 +794,7 @@ async function fetchStockPicks(country){
 SEARCH: ${await searchWeb(`${target} ${exIdx} top stocks 2026`)}
 Return JSON with ALL 5 in picks array:
 {"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":65,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"2 sentences about ${target} market.","macroFactors":["factor1","factor2","factor3"],"keyDrivers":["driver1","driver2"],"sectorRotation":{"leading":["s1","s2"],"lagging":["s1","s2"]},"picks":[{"rank":1,"symbol":"T1","name":"Company1","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"2 sentences why buy.","tradingSetup":"1 sentence setup.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence news.","confidence":75,"timeframe":"Q2 2026"},{"rank":2,"symbol":"T2","name":"Company2","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+5%","upside6m":"+10%","upside1y":"+18%","signal":"HOLD","tradingSignal":"HOLD","investmentSignal":"BUY","rsi":52,"maSignal":"NEUTRAL","volumeTrend":"STABLE","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:1.8","volatility":"MEDIUM","beta":0.9,"pe":"20","epsGrowth":"+12%","revenueGrowth":"+8%","debtEquity":"0.45","dividendYield":"2.5%","institutionalOwnership":"65%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":65,"timeframe":"Q3 2026"},{"rank":3,"symbol":"T3","name":"Company3","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+10%","upside6m":"+20%","upside1y":"+30%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":62,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:3","volatility":"LOW","beta":1.2,"pe":"35","epsGrowth":"+25%","revenueGrowth":"+18%","debtEquity":"0.2","dividendYield":"0.8%","institutionalOwnership":"78%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":80,"timeframe":"Q2 2026"},{"rank":4,"symbol":"T4","name":"Company4","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"-3%","upside6m":"+5%","upside1y":"+12%","signal":"SELL","tradingSignal":"SELL","investmentSignal":"HOLD","rsi":45,"maSignal":"BEARISH","volumeTrend":"DECREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:1.2","volatility":"HIGH","beta":1.5,"pe":"15","epsGrowth":"+5%","revenueGrowth":"+3%","debtEquity":"0.8","dividendYield":"3.5%","institutionalOwnership":"55%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":50,"timeframe":"Q4 2026"},{"rank":5,"symbol":"T5","name":"Company5","sector":"s","currentPrice":"${cur}0","targetPrice1m":"${cur}0","targetPrice6m":"${cur}0","targetPrice1y":"${cur}0","upside1m":"+6%","upside6m":"+12%","upside1y":"+22%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":55,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}0","resistanceLevel":"${cur}0","stopLoss":"${cur}0","riskReward":"1:2","volatility":"MEDIUM","beta":1.0,"pe":"28","epsGrowth":"+15%","revenueGrowth":"+10%","debtEquity":"0.35","dividendYield":"1.5%","institutionalOwnership":"70%","thesis":"2 sentences.","tradingSetup":"1 sentence.","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"1 sentence.","confidence":70,"timeframe":"Q3 2026"}]}`,
-    "{",3000);
+    "{",3000,2,`pk:${target}:${_todayKey()}`);
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
     // Normalize all pick fields to prevent render crashes
@@ -830,7 +834,7 @@ async function fetchIntel(country){
 ${await searchWeb(`${t} current leader political news 2026`)}
 Return JSON, no markdown. Use REAL stability score based on country situation (Russia~35, Ukraine~25, Iran~30, Israel~40, India~68, USA~72, UK~75, Germany~74, China~55, Pakistan~38):
 {"threatLevel":"high|elevated|moderate|low","stabilityIndex":REAL_NUMBER_0_TO_100,"summary":"2 sentences from search","alerts":[{"type":"political","level":"high","title":"real event","detail":"real detail"},{"type":"economic","level":"medium","title":"real issue","detail":"real detail"},{"type":"military","level":"medium","title":"real issue","detail":"real detail"},{"type":"cyber","level":"low","title":"real threat","detail":"real detail"}],"activeConflicts":["real conflict 1","real conflict 2"],"economicPressures":["real pressure 1","real pressure 2"],"cyberThreats":["real threat 1","real threat 2"],"diplomaticAlerts":["real alert 1","real alert 2"]}`,
-    "{",800);
+    "{",800,2,`intel:${t}:${_todayKey()}`);
   const obj=pObj(raw);
   if(obj){
     // Normalize keys — 8b model returns inconsistent field names
@@ -863,7 +867,7 @@ async function fetchForecast(country){
 ${await searchWeb(`${t} GDP inflation interest rate 2026`)}
 Return JSON with REAL values for ${t}, no markdown. Use actual country data not placeholder numbers:
 {"country":"${t}","stability":REAL_0_TO_100,"geopoliticalScore":REAL_0_TO_100,"confidenceScore":REAL_0_TO_100,"economicOutlook":"positive|neutral|negative|critical","gdpGrowth":"REAL_%","inflation":"REAL_%","unemployment":"REAL_%","interestRate":"REAL_%","currencyStrength":"STRONG|STABLE|WEAK|VOLATILE","sixMonthPrediction":"2 sentences","workingClassForecast":"1 sentence","marketOutlook":"1 sentence","traderOpportunities":"1 sentence","keyRisks":["real risk 1","real risk 2","real risk 3"],"opportunities":["real opportunity 1","real opportunity 2","real opportunity 3"],"basedOn":"sources from search"}`,
-    "{",800);
+    "{",800,2,`fc:${t}:${_todayKey()}`);
   const obj=pObj(raw);
   if(obj){
     // Normalize keys — 8b model returns inconsistent field names

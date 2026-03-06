@@ -1,9 +1,9 @@
 // pages/api/claude.js — Groq proxy with Supabase server-side cache
 // Edge runtime = 25s timeout (vs 10s serverless)
-// Server cache = all users share one Groq call per tab/country per 30 mins
+// Server cache = all users share one Groq call per tab/country per day (20hr TTL)
 export const config = { runtime: 'edge' };
 
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const CACHE_TTL_MS = 20 * 60 * 60 * 1000; // 20 hours — key already has date so safe all day
 
 async function getCached(sbUrl, sbKey, cacheKey) {
   try {
@@ -81,7 +81,7 @@ export default async function handler(req) {
   }
 
   // ── GROQ CALL ─────────────────────────────────────────────────────────────
-  // No response_format json_object — plain text mode is 3-5s vs 15-20s
+  // Plain text mode — faster (3-5s) than structured mode (15-20s), we parse JSON ourselves
   const groqBody = {
     model: 'llama-3.3-70b-versatile',
     messages: [

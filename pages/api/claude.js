@@ -1,5 +1,3 @@
-// pages/api/claude.js — Groq proxy on Vercel Edge Runtime
-// Edge = 25s timeout (vs 10s serverless). jsonMode removed — plain text is 3x faster.
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
@@ -33,8 +31,6 @@ export default async function handler(req) {
     });
   }
 
-  // NOTE: No response_format json_object — plain text mode is 3-5s vs 15-20s for json_object
-  // We extract JSON ourselves via _extractJSON in the frontend
   const groqBody = {
     model: "llama-3.3-70b-versatile",
     messages: [
@@ -61,27 +57,29 @@ export default async function handler(req) {
     const data = await response.json();
 
     if (!response.ok) {
+      // Pass exact Groq error back so browser console shows the real reason
+      const groqErr = data?.error?.message || "Groq API error";
       return new Response(JSON.stringify({
-        error: data?.error?.message || "Groq API error",
+        error: groqErr,
         groqStatus: response.status,
+        groqType: data?.error?.type,
       }), { status: response.status, headers: { "Content-Type": "application/json" } });
     }
 
     const text = data?.choices?.[0]?.message?.content || "";
     if (!text) {
-      return new Response(JSON.stringify({ text: "", error: "Empty response" }), {
+      return new Response(JSON.stringify({ text: "", error: "Empty Groq response" }), {
         status: 200, headers: { "Content-Type": "application/json" }
       });
     }
 
-    // Strip markdown fences if Groq adds them
     const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
     return new Response(JSON.stringify({ text: cleaned }), {
       status: 200, headers: { "Content-Type": "application/json" }
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Proxy failed: " + err.message }), {
+    return new Response(JSON.stringify({ error: "Proxy error: " + err.message }), {
       status: 500, headers: { "Content-Type": "application/json" }
     });
   }

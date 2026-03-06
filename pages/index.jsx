@@ -720,12 +720,12 @@ async function fetchMarkets(country){
   // Convert "0700.HK=Tencent Holdings,9988.HK=Alibaba Group" into explicit instructions
   const ref=refRaw.split(",").map(r=>{const[sym,name]=r.split("=");return `${sym.trim()} → name is "${name.trim()}"`}).join(", ");
   const raw=await callClaudeJSON(
-`Today ${today}. Market data for ${target} ${exIdx}. Use ONLY:
-${await searchWeb(`${exIdx} ${target} stocks today`)}
-Tickers→names: ${ref}
-Return JSON, no markdown:
-{"stocks":[{"rank":1,"symbol":"TICKER","name":"COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VAL","pe":"28.5","signal":"BUY","signalStrength":78,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+12%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"}]}`,
-    "{",800);
+`Today ${today}. Generate market data for ALL 5 companies listed below for ${target} ${exIdx}.
+SEARCH: ${await searchWeb(`${exIdx} ${target} stocks today`)}
+YOU MUST include exactly 5 stocks — one for EACH of these: ${ref}
+Return JSON with all 5 stocks, no markdown:
+{"stocks":[{"rank":1,"symbol":"FIRST_TICKER","name":"FIRST COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"+0.85%","change1d_raw":0.85,"change1w":"+2.1%","change1w_raw":2.1,"change1m":"+5.2%","change1m_raw":5.2,"volume":"12M","marketCap":"${cur}VAL","pe":"28.5","signal":"BUY","signalStrength":72,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+12%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"},{"rank":2,"symbol":"SECOND_TICKER","name":"SECOND COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"-0.3%","change1d_raw":-0.3,"change1w":"+1.2%","change1w_raw":1.2,"change1m":"+3.1%","change1m_raw":3.1,"volume":"8M","marketCap":"${cur}VAL","pe":"22.1","signal":"HOLD","signalStrength":58,"shortTerm":"NEUTRAL","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+8%","riskLevel":"MEDIUM","whyNow":"reason","catalyst":"catalyst","trend":"stable"},{"rank":3,"symbol":"THIRD_TICKER","name":"THIRD COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"+1.1%","change1d_raw":1.1,"change1w":"+3.5%","change1w_raw":3.5,"change1m":"+7.2%","change1m_raw":7.2,"volume":"20M","marketCap":"${cur}VAL","pe":"35.2","signal":"BUY","signalStrength":85,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+15%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"},{"rank":4,"symbol":"FOURTH_TICKER","name":"FOURTH COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"-1.2%","change1d_raw":-1.2,"change1w":"-0.5%","change1w_raw":-0.5,"change1m":"+1.8%","change1m_raw":1.8,"volume":"5M","marketCap":"${cur}VAL","pe":"18.5","signal":"SELL","signalStrength":35,"shortTerm":"BEARISH","longTerm":"NEUTRAL","targetPrice":"${cur}VAL","upside":"-5%","riskLevel":"HIGH","whyNow":"reason","catalyst":"catalyst","trend":"down"},{"rank":5,"symbol":"FIFTH_TICKER","name":"FIFTH COMPANY NAME","sector":"sector","price":"${cur}0.00","change1d":"+0.4%","change1d_raw":0.4,"change1w":"+1.8%","change1w_raw":1.8,"change1m":"+4.5%","change1m_raw":4.5,"volume":"15M","marketCap":"${cur}VAL","pe":"25.8","signal":"BUY","signalStrength":68,"shortTerm":"BULLISH","longTerm":"BULLISH","targetPrice":"${cur}VAL","upside":"+10%","riskLevel":"LOW","whyNow":"reason","catalyst":"catalyst","trend":"up"}]}`,
+    "{",1500);
   const obj=pObj(raw);
   // Normalize stocks key — 8b model sometimes returns "stock" or "Stocks"
   if(obj&&!obj.stocks&&obj.stock)obj.stocks=Array.isArray(obj.stock)?obj.stock:[obj.stock];
@@ -776,13 +776,13 @@ async function fetchStockPicks(country){
   const refRaw=getPRef(target);
   const ref=refRaw.split(",").map(r=>{const[sym,name]=r.split("=");return `${sym.trim()} → name is "${name.trim()}"`}).join(", ");
   const raw=await callClaudeJSON(
-`Today is ${today}. Investment analysis for ${target} ${ex} (${exIdx}).
+`Today is ${today}. Investment analysis for ALL 5 companies listed for ${target} ${ex} (${exIdx}).
 SEARCH: ${await searchWeb(`${target} ${exIdx} top stocks 2026`)}
-Use ONLY these tickers→names: ${ref}
-Return JSON with all fields filled — no placeholder text:
+YOU MUST return exactly 5 picks in the picks array — one for EACH of: ${ref}
+Return JSON with all 5 picks filled — no placeholder text:
 {"exchange":"${ex}","index":"${exIdx}","marketSentiment":"bullish","sentimentScore":68,"fearGreedIndex":55,"indexChange1d":"+0.85%","indexChange1w":"+2.1%","marketOutlook":"Two specific sentences about ${target} market right now.","macroFactors":["real factor 1","real factor 2","real factor 3"],"keyDrivers":["real driver 1","real driver 2"],"sectorRotation":{"leading":["sector1","sector2"],"lagging":["sector1","sector2"]},"picks":[{"rank":1,"symbol":"TICKER","name":"Full Company Name","sector":"sector","currentPrice":"${cur}NUM","targetPrice1m":"${cur}NUM","targetPrice6m":"${cur}NUM","targetPrice1y":"${cur}NUM","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH CROSSOVER","volumeTrend":"INCREASING","supportLevel":"${cur}NUM","resistanceLevel":"${cur}NUM","stopLoss":"${cur}NUM","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25.4","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"Two specific sentences about why to buy this stock now.","tradingSetup":"One sentence trading setup.","catalysts":["real catalyst 1","real catalyst 2"],"risks":["real risk 1","real risk 2"],"newsDriver":"One sentence about recent news.","confidence":75,"timeframe":"Q2 2025"}]}
 All numbers must be actual numbers, not strings like NUMBER_X_TO_Y. sentimentScore and fearGreedIndex must be integers 30-90.`,
-    "{",2200);
+    "{",2500);
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
     // Normalize all pick fields to prevent render crashes
@@ -820,8 +820,8 @@ async function fetchIntel(country){
   const raw=await callClaudeJSON(
 `Today ${today}. Geopolitical briefing for ${t}. Use ONLY:
 ${await searchWeb(`${t} current leader political news 2026`)}
-Return JSON, no markdown:
-{"threatLevel":"high|elevated|moderate|low","stabilityIndex":65,"summary":"2 sentences from search","alerts":[{"type":"political","level":"high","title":"event","detail":"detail"},{"type":"economic","level":"medium","title":"issue","detail":"detail"},{"type":"military","level":"medium","title":"issue","detail":"detail"},{"type":"cyber","level":"low","title":"threat","detail":"detail"}],"activeConflicts":["c1","c2"],"economicPressures":["p1","p2"],"cyberThreats":["t1","t2"],"diplomaticAlerts":["a1","a2"]}`,
+Return JSON, no markdown. Use REAL stability score based on country situation (Russia~35, Ukraine~25, Iran~30, Israel~40, India~68, USA~72, UK~75, Germany~74, China~55, Pakistan~38):
+{"threatLevel":"high|elevated|moderate|low","stabilityIndex":REAL_NUMBER_0_TO_100,"summary":"2 sentences from search","alerts":[{"type":"political","level":"high","title":"real event","detail":"real detail"},{"type":"economic","level":"medium","title":"real issue","detail":"real detail"},{"type":"military","level":"medium","title":"real issue","detail":"real detail"},{"type":"cyber","level":"low","title":"real threat","detail":"real detail"}],"activeConflicts":["real conflict 1","real conflict 2"],"economicPressures":["real pressure 1","real pressure 2"],"cyberThreats":["real threat 1","real threat 2"],"diplomaticAlerts":["real alert 1","real alert 2"]}`,
     "{",800);
   const obj=pObj(raw);
   if(obj){
@@ -853,8 +853,8 @@ async function fetchForecast(country){
   const raw=await callClaudeJSON(
 `Today ${today}. Economic data for ${t}. Use ONLY:
 ${await searchWeb(`${t} GDP inflation interest rate 2026`)}
-Return JSON, no markdown:
-{"country":"${t}","stability":65,"geopoliticalScore":65,"confidenceScore":70,"economicOutlook":"positive|neutral|negative|critical","gdpGrowth":"+X.X%","inflation":"X.X%","unemployment":"X.X%","interestRate":"X.XX%","currencyStrength":"STRONG|STABLE|WEAK|VOLATILE","sixMonthPrediction":"2 sentences","workingClassForecast":"1 sentence","marketOutlook":"1 sentence","traderOpportunities":"1 sentence","keyRisks":["r1","r2","r3"],"opportunities":["o1","o2","o3"],"basedOn":"sources"}`,
+Return JSON with REAL values for ${t}, no markdown. Use actual country data not placeholder numbers:
+{"country":"${t}","stability":REAL_0_TO_100,"geopoliticalScore":REAL_0_TO_100,"confidenceScore":REAL_0_TO_100,"economicOutlook":"positive|neutral|negative|critical","gdpGrowth":"REAL_%","inflation":"REAL_%","unemployment":"REAL_%","interestRate":"REAL_%","currencyStrength":"STRONG|STABLE|WEAK|VOLATILE","sixMonthPrediction":"2 sentences","workingClassForecast":"1 sentence","marketOutlook":"1 sentence","traderOpportunities":"1 sentence","keyRisks":["real risk 1","real risk 2","real risk 3"],"opportunities":["real opportunity 1","real opportunity 2","real opportunity 3"],"basedOn":"sources from search"}`,
     "{",800);
   const obj=pObj(raw);
   if(obj){

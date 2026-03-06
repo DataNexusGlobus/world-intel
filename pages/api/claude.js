@@ -83,7 +83,7 @@ export default async function handler(req) {
   // ── GROQ CALL ─────────────────────────────────────────────────────────────
   // No response_format json_object — plain text mode is 3-5s vs 15-20s
   const groqBody = {
-    model: 'llama-3.1-8b-instant',
+    model: 'llama-3.3-70b-versatile',
     messages: [
       {
         role: 'system',

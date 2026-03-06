@@ -1,98 +1,102 @@
-// pages/api/prices.js
-// Finnhub real-time stock price proxy — free tier, no credit card
-// Called AFTER Groq returns stock symbols, to enrich with real prices
-// FINNHUB_API_KEY stored securely in Vercel env vars
+// pages/api/prices.js — Yahoo Finance real-time stock prices
+// Supports ALL global exchanges: NSE India, LSE UK, TSX, TSE Japan, HKEX, etc.
+// No API key needed. Free and unlimited (unofficial API).
+// Graceful fallback: if Yahoo fails for any symbol, Groq estimate is kept.
+export const config = { runtime: 'edge' };
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+export default async function handler(req) {
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ prices: {} }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  const apiKey = process.env.FINNHUB_API_KEY;
-  if (!apiKey) {
-    // Graceful degradation — if no key, return empty so Groq prices are used
-    return res.status(200).json({ prices: {}, error: "FINNHUB_API_KEY not set" });
+  let symbols = [];
+  try {
+    const body = await req.json();
+    symbols = body.symbols || [];
+  } catch {
+    return new Response(JSON.stringify({ prices: {} }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  const { symbols } = req.body || {};
-  if (!symbols || !Array.isArray(symbols) || symbols.length === 0) {
-    return res.status(200).json({ prices: {} });
+  if (!Array.isArray(symbols) || symbols.length === 0) {
+    return new Response(JSON.stringify({ prices: {} }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    });
   }
 
-  // Fetch all symbols in parallel — Finnhub free: 60 req/min, plenty
+  // Fetch all symbols in parallel — Yahoo handles concurrent requests fine
   const results = {};
-
   await Promise.all(
     symbols.map(async (symbol) => {
+      if (!symbol) return;
       try {
-        // Finnhub uses different symbol formats for global stocks
-        // NSE India: RELIANCE.NS → need to map
-        const finnhubSymbol = mapSymbol(symbol);
-        const url = `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(finnhubSymbol)}&token=${apiKey}`;
+        // Yahoo Finance chart API — works for all global exchanges
+        // Symbol format is same as what we already use:
+        // RELIANCE.NS, TCS.NS, HSBA.L, 0700.HK, 7203.T etc — Yahoo accepts all of these directly
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
 
-        const response = await fetch(url);
-        if (!response.ok) return;
+        const res = await fetch(url, {
+          headers: {
+            // Yahoo sometimes blocks requests without a user agent
+            'User-Agent': 'Mozilla/5.0 (compatible; WorldIntel/1.0)',
+          },
+        });
 
-        const data = await response.json();
+        if (!res.ok) return; // silent fail — Groq price kept
 
-        // Finnhub returns: c=current, h=high, l=low, o=open, pc=prev close, dp=change%
-        if (data && data.c && data.c > 0) {
-          results[symbol] = {
-            price: data.c,
-            change1d_raw: data.dp || 0,
-            high: data.h,
-            low: data.l,
-            prevClose: data.pc,
-            isReal: true,
-          };
+        const data = await res.json();
+
+        // Yahoo response structure — be liberal, handle multiple formats
+        // path 1: result[0].meta
+        // path 2: result[0].indicators.quote[0]
+        const result = data?.chart?.result?.[0];
+        if (!result) return;
+
+        const meta = result.meta;
+        if (!meta) return;
+
+        // Current price — try multiple fields Yahoo might return
+        const price =
+          meta.regularMarketPrice ||       // most common
+          meta.currentPrice ||             // sometimes used
+          meta.postMarketPrice ||          // after hours
+          meta.preMarketPrice ||           // pre market
+          null;
+
+        if (!price || price <= 0) return;
+
+        // Previous close for change calculation
+        const prevClose =
+          meta.chartPreviousClose ||
+          meta.previousClose ||
+          meta.regularMarketPreviousClose ||
+          null;
+
+        // Change % — calculate ourselves or use Yahoo's value
+        let change1d_raw = 0;
+        if (prevClose && prevClose > 0) {
+          change1d_raw = parseFloat(((price - prevClose) / prevClose * 100).toFixed(2));
+        } else if (meta.regularMarketChangePercent != null) {
+          change1d_raw = parseFloat(meta.regularMarketChangePercent.toFixed(2));
         }
-      } catch (err) {
+
+        results[symbol] = {
+          price: parseFloat(price.toFixed(2)),
+          change1d_raw,
+          prevClose: prevClose || null,
+          isReal: true,
+        };
+
+      } catch {
         // Silent fail per symbol — Groq price used as fallback
-        console.warn(`Price fetch failed for ${symbol}:`, err.message);
       }
     })
   );
 
-  return res.status(200).json({ prices: results });
-}
-
-// Map ticker symbols to Finnhub format
-function mapSymbol(symbol) {
-  if (!symbol) return symbol;
-
-  // Indian NSE stocks: RELIANCE.NS → NSE:RELIANCE
-  if (symbol.endsWith(".NS")) return "NSE:" + symbol.replace(".NS", "");
-  // Indian BSE stocks: RELIANCE.BO → BSE:RELIANCE
-  if (symbol.endsWith(".BO")) return "BSE:" + symbol.replace(".BO", "");
-  // London: BP.L → LSE:BP
-  if (symbol.endsWith(".L")) return "LSE:" + symbol.replace(".L", "");
-  // Tokyo: 7203.T → TYO:7203
-  if (symbol.endsWith(".T")) return "TYO:" + symbol.replace(".T", "");
-  // Hong Kong: 9988.HK → HKEX:9988
-  if (symbol.endsWith(".HK")) return "HKEX:" + symbol.replace(".HK", "");
-  // Germany XETRA: SAP.DE → XETRA:SAP
-  if (symbol.endsWith(".DE")) return "XETRA:" + symbol.replace(".DE", "");
-  // Korea: 005930.KS → KRX:005930
-  if (symbol.endsWith(".KS")) return "KRX:" + symbol.replace(".KS", "");
-  // Australia: BHP.AX → ASX:BHP
-  if (symbol.endsWith(".AX")) return "ASX:" + symbol.replace(".AX", "");
-  // Brazil: PETR4.SA → BOVESPA:PETR4
-  if (symbol.endsWith(".SA")) return "BOVESPA:" + symbol.replace(".SA", "");
-  // Paris: MC.PA → EPA:MC
-  if (symbol.endsWith(".PA")) return "EPA:" + symbol.replace(".PA", "");
-  // Canada: SHOP.TO → TSX:SHOP
-  if (symbol.endsWith(".TO")) return "TSX:" + symbol.replace(".TO", "");
-  // Dubai: EMAAR.DU → DFM:EMAAR
-  if (symbol.endsWith(".DU")) return "DFM:" + symbol.replace(".DU", "");
-  // Abu Dhabi: FAB.AD → ADX:FAB
-  if (symbol.endsWith(".AD")) return "ADX:" + symbol.replace(".AD", "");
-  // Saudi: 2222.SR → TADAWUL:2222
-  if (symbol.endsWith(".SR")) return "TADAWUL:" + symbol.replace(".SR", "");
-  // Shanghai: 601398.SS → SHANGHAI:601398
-  if (symbol.endsWith(".SS")) return "SHANGHAI:" + symbol.replace(".SS", "");
-  // Shenzhen: 002594.SZ → SHENZHEN:002594
-  if (symbol.endsWith(".SZ")) return "SHENZHEN:" + symbol.replace(".SZ", "");
-
-  // US stocks — use as-is (AAPL, MSFT, NVDA etc.)
-  return symbol;
+  return new Response(JSON.stringify({ prices: results }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  });
 }

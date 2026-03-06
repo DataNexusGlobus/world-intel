@@ -84,7 +84,7 @@ function getEx(c="usa"){
   if(l.includes("pakistan"))return{ex:"PSX",idx:"KSE-100",cur:"PKR "};
   if(l.includes("china"))return{ex:"SSE/SZSE",idx:"CSI 300 & Shanghai",cur:"¥"};
   if(l.includes("japan"))return{ex:"TSE",idx:"Nikkei 225",cur:"¥"};
-  if(l.includes("uk")||l.includes("britain"))return{ex:"LSE",idx:"FTSE 100",cur:"£"};
+  if(l.includes("uk")||l.includes("britain")||l.includes("kingdom"))return{ex:"LSE",idx:"FTSE 100",cur:"£"};
   if(l.includes("germany"))return{ex:"Frankfurt",idx:"DAX 40",cur:"€"};
   if(l.includes("france")||l.includes("eu"))return{ex:"Euronext",idx:"CAC 40 / Euro Stoxx",cur:"€"};
   if(l.includes("australia"))return{ex:"ASX",idx:"ASX 200",cur:"A$"};
@@ -145,6 +145,26 @@ async function _throttle(){
    Supports ALL global exchanges: NSE India, LSE UK, HKEX, TSE Japan etc.
    Liberal approach: accept any valid positive price from Yahoo, no strict ratio check.
    Gracefully degrades: if Yahoo fails for any symbol, Groq estimate is kept. */
+
+// Derive currency symbol from stock exchange suffix — reliable, never depends on Groq output
+function _curForSymbol(sym){
+  if(!sym)return"$";
+  const s=sym.toUpperCase(); // normalize — Groq sometimes returns lowercase tickers
+  if(s.endsWith(".NS")||s.endsWith(".BO"))return"₹";
+  if(s.endsWith(".L"))return"£";
+  if(s.endsWith(".T"))return"¥";
+  if(s.endsWith(".HK"))return"HK$";
+  if(s.endsWith(".DE")||s.endsWith(".PA"))return"€";
+  if(s.endsWith(".KS"))return"₩";
+  if(s.endsWith(".AX"))return"A$";
+  if(s.endsWith(".SA"))return"R$";
+  if(s.endsWith(".TO"))return"C$";
+  if(s.endsWith(".DU")||s.endsWith(".AD"))return"AED ";
+  if(s.endsWith(".SR"))return"SAR ";
+  if(s.endsWith(".SS")||s.endsWith(".SZ"))return"¥";
+  return"$"; // US NYSE/NASDAQ default
+}
+
 async function fetchRealPrices(stocks){
   try{
     const symbols=stocks.map(s=>s.symbol).filter(Boolean);
@@ -162,12 +182,13 @@ async function fetchRealPrices(stocks){
       const p=prices[s.symbol];
       // If Yahoo didn't return this symbol — keep Groq data
       if(!p||!p.isReal||!p.price||p.price<=0)return s;
-      // Extract currency prefix from Groq's price string (₹, £, $, ¥, €, A$, C$ etc.)
-      // Be liberal — take everything before the first digit
-      const groqPriceStr=s.price||s.currentPrice||"";
-      const cur=groqPriceStr.match(/^[^0-9]*/)?.[0]||"";
-      // Format Yahoo price with same currency prefix
-      const formatted=cur+p.price.toLocaleString("en-IN",{maximumFractionDigits:2});
+      // Get currency from symbol suffix — never from Groq string (avoids "₹PRICE" bug)
+      const cur=_curForSymbol(s.symbol);
+      // Format: Indian locale for ₹ (1,234.56), standard for others
+      const formatted=cur+p.price.toLocaleString(
+        cur==="₹"?"en-IN":"en-US",
+        {maximumFractionDigits:2}
+      );
       const ch=p.change1d_raw||0;
       const chStr=ch>=0?`+${ch.toFixed(2)}%`:`${ch.toFixed(2)}%`;
       return{...s,
@@ -800,7 +821,7 @@ Return JSON with ALL 5 in picks array:
 {"exchange":"${ex}","index":"${exIdx}","marketSentiment":"REAL_bullish_or_bearish_or_neutral","sentimentScore":REAL_0_TO_100,"fearGreedIndex":REAL_0_TO_100,"indexChange1d":"REAL_%","indexChange1w":"REAL_%","marketOutlook":"REAL 2 sentences about ${target} market current conditions.","macroFactors":["REAL_factor1","REAL_factor2","REAL_factor3"],"keyDrivers":["REAL_driver1","REAL_driver2"],"sectorRotation":{"leading":["REAL_s1","REAL_s2"],"lagging":["REAL_s1","REAL_s2"]},"picks":[{"rank":1,"symbol":"T1","name":"Company1","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+8%","upside6m":"+15%","upside1y":"+25%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":58,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:2.5","volatility":"MEDIUM","beta":1.1,"pe":"25","epsGrowth":"+18%","revenueGrowth":"+12%","debtEquity":"0.32","dividendYield":"1.8%","institutionalOwnership":"72%","thesis":"REAL_THESIS_WHY_BUY","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":75,"timeframe":"Q2 2026"},{"rank":2,"symbol":"T2","name":"Company2","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+5%","upside6m":"+10%","upside1y":"+18%","signal":"HOLD","tradingSignal":"HOLD","investmentSignal":"BUY","rsi":52,"maSignal":"NEUTRAL","volumeTrend":"STABLE","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:1.8","volatility":"MEDIUM","beta":0.9,"pe":"20","epsGrowth":"+12%","revenueGrowth":"+8%","debtEquity":"0.45","dividendYield":"2.5%","institutionalOwnership":"65%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":65,"timeframe":"Q3 2026"},{"rank":3,"symbol":"T3","name":"Company3","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+10%","upside6m":"+20%","upside1y":"+30%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":62,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:3","volatility":"LOW","beta":1.2,"pe":"35","epsGrowth":"+25%","revenueGrowth":"+18%","debtEquity":"0.2","dividendYield":"0.8%","institutionalOwnership":"78%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":80,"timeframe":"Q2 2026"},{"rank":4,"symbol":"T4","name":"Company4","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"-3%","upside6m":"+5%","upside1y":"+12%","signal":"SELL","tradingSignal":"SELL","investmentSignal":"HOLD","rsi":45,"maSignal":"BEARISH","volumeTrend":"DECREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:1.2","volatility":"HIGH","beta":1.5,"pe":"15","epsGrowth":"+5%","revenueGrowth":"+3%","debtEquity":"0.8","dividendYield":"3.5%","institutionalOwnership":"55%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":50,"timeframe":"Q4 2026"},{"rank":5,"symbol":"T5","name":"Company5","sector":"s","currentPrice":"${cur}PRICE","targetPrice1m":"${cur}PRICE","targetPrice6m":"${cur}PRICE","targetPrice1y":"${cur}PRICE","upside1m":"+6%","upside6m":"+12%","upside1y":"+22%","signal":"BUY","tradingSignal":"BUY","investmentSignal":"BUY","rsi":55,"maSignal":"BULLISH","volumeTrend":"INCREASING","supportLevel":"${cur}PRICE","resistanceLevel":"${cur}PRICE","stopLoss":"${cur}PRICE","riskReward":"1:2","volatility":"MEDIUM","beta":1.0,"pe":"28","epsGrowth":"+15%","revenueGrowth":"+10%","debtEquity":"0.35","dividendYield":"1.5%","institutionalOwnership":"70%","thesis":"REAL_THESIS","tradingSetup":"REAL_SETUP","catalysts":["c1","c2"],"risks":["r1","r2"],"newsDriver":"REAL_NEWS","confidence":70,"timeframe":"Q3 2026"}]}`,
     "{",3000,2,`pk:${target}:${_todayKey()}`);
   const obj=pObj(raw);
-  if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^PK\d$/.test(obj.picks[0].symbol)){
+  if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^(PK|T)\d$/.test(obj.picks[0].symbol)){
     // Normalize all pick fields to prevent render crashes
     obj.picks=obj.picks.filter(p=>p&&p.symbol&&p.rank).map(p=>({...p,
       rsi:parseInt(p.rsi)||55,
@@ -882,7 +903,7 @@ Return JSON with REAL values for ${t}, no markdown. Use actual country data not 
     if(!obj.interestRate&&obj.interest_rate)obj.interestRate=obj.interest_rate;
     if(!obj.country)obj.country=t;
     if(!obj.economicOutlook&&obj.outlook)obj.economicOutlook=obj.outlook;
-    if(obj.country||obj.gdpGrowth||obj.inflation){obj._isLive=true; _cs(_fcKey,obj); return obj;}
+    if(obj.gdpGrowth||obj.inflation||obj.gdpGrowth||obj.unemployment||obj.interestRate){obj._isLive=true; _cs(_fcKey,obj); return obj;}
   }
   const fb=fbForecast(t);fb._isLive=false;return fb;
 }

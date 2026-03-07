@@ -35,6 +35,33 @@ async function setCached(sbUrl, sbKey, cacheKey, value) {
   } catch {}
 }
 
+// ── DAILY CALL COUNTER ───────────────────────────────────────────────────
+// Atomic increment — reads AND writes in one DB operation
+// Prevents race condition where two simultaneous requests both read the same
+// count, both pass the cap check, and both call Groq (overshoot)
+// Key format: "calls:2026-03-07" — auto-resets daily via date in key
+const DAILY_GROQ_CAP = 45; // 45 calls × ~1,800 tokens avg = ~81k tokens (safe under 100k)
+
+async function atomicIncrementAndCheck(sbUrl, sbKey) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const key = `calls:${today}`;
+    // Calls Supabase RPC — increments counter and returns new value atomically
+    // No race condition: DB processes each request sequentially with row lock
+    const res = await fetch(`${sbUrl}/rest/v1/rpc/increment_call_count`, {
+      method: 'POST',
+      headers: {
+        apikey: sbKey,
+        Authorization: `Bearer ${sbKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_key: key }),
+    });
+    const newCount = await res.json();
+    return parseInt(newCount) || 0;
+  } catch { return 0; } // Supabase down → fail open (allow call, don't block user)
+}
+
 export default async function handler(req) {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -56,7 +83,7 @@ export default async function handler(req) {
   try {
     const body = await req.json();
     prompt    = body.prompt;
-    maxTokens = body.maxTokens || 1000;
+    maxTokens = Math.min(4000, Math.max(100, parseInt(body.maxTokens) || 1000)); // clamp 100–4000
     cacheKey  = body.cacheKey || null; // e.g. "mkt:India:2026-03-07"
   } catch {
     return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
@@ -77,6 +104,20 @@ export default async function handler(req) {
       return new Response(JSON.stringify({ text: cached, serverCached: true }), {
         status: 200, headers: { 'Content-Type': 'application/json' },
       });
+    }
+  }
+
+  // ── ATOMIC CAP CHECK ─────────────────────────────────────────────────────
+  // Increments counter AND checks cap in one DB operation — no race condition
+  // If two requests arrive simultaneously, DB serializes them: one gets N, next gets N+1
+  // The request that gets a count > CAP is blocked; no overshoot possible
+  if (sbUrl && sbKey) {
+    const newCount = await atomicIncrementAndCheck(sbUrl, sbKey);
+    if (newCount > DAILY_GROQ_CAP) {
+      return new Response(JSON.stringify({
+        error: 'Daily AI quota reached. Cached data is still available. Fresh data resets at midnight UTC (5:30 AM IST).',
+        quotaExceeded: true,
+      }), { status: 429, headers: { 'Content-Type': 'application/json' } });
     }
   }
 
@@ -123,9 +164,16 @@ export default async function handler(req) {
       });
     }
 
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+    // Strip markdown fences — also catch any residual lone backticks after stripping
+    const cleaned = raw
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/i, '')
+      .trim()
+      .replace(/^`+|`+$/g, '') // remove any remaining backticks at edges
+      .trim();
 
     // ── STORE IN SERVER CACHE ───────────────────────────────────────────────
+    // Counter already incremented atomically before Groq call — no separate increment needed
     if (cacheKey && sbUrl && sbKey && cleaned) {
       await setCached(sbUrl, sbKey, cacheKey, cleaned);
     }

@@ -27,23 +27,30 @@ export default async function handler(req) {
     });
   }
 
-  // Fetch all symbols in parallel — Yahoo handles concurrent requests fine
+  // Fetch all symbols in parallel — cap at 20 to avoid Yahoo rate limits
   const results = {};
   await Promise.all(
-    symbols.map(async (symbol) => {
-      if (!symbol) return;
+    symbols.slice(0, 20).map(async (symbol) => {
+      // Guard: must be a non-empty string — reject numbers, objects, null
+      if (!symbol || typeof symbol !== 'string') return;
       try {
-        // Yahoo Finance chart API — works for all global exchanges
-        // Symbol format is same as what we already use:
-        // RELIANCE.NS, TCS.NS, HSBA.L, 0700.HK, 7203.T etc — Yahoo accepts all of these directly
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
 
-        const res = await fetch(url, {
-          headers: {
-            // Yahoo sometimes blocks requests without a user agent
-            'User-Agent': 'Mozilla/5.0 (compatible; WorldIntel/1.0)',
-          },
-        });
+        // 6s timeout per symbol — prevents one hanging fetch from blocking Edge's 25s limit
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 6000);
+
+        let res;
+        try {
+          res = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; WorldIntel/1.0)',
+            },
+          });
+        } finally {
+          clearTimeout(timer);
+        }
 
         if (!res.ok) return; // silent fail — Groq price kept
 
@@ -68,7 +75,8 @@ export default async function handler(req) {
           0
         ) || null;
 
-        if (!price || price <= 0) return;
+        // Reject invalid prices: 0, negative, Infinity, NaN
+        if (!price || price <= 0 || !isFinite(price)) return;
 
         // Previous close for change calculation — also parseFloat for safety
         const prevClose = parseFloat(
@@ -78,12 +86,12 @@ export default async function handler(req) {
           0
         ) || null;
 
-        // Change % — calculate ourselves or use Yahoo's value
+        // Change % — parseFloat on changePercent too (Yahoo sometimes returns string)
         let change1d_raw = 0;
-        if (prevClose && prevClose > 0) {
+        if (prevClose && prevClose > 0 && isFinite(prevClose)) {
           change1d_raw = parseFloat(((price - prevClose) / prevClose * 100).toFixed(2));
         } else if (meta.regularMarketChangePercent != null) {
-          change1d_raw = parseFloat(meta.regularMarketChangePercent.toFixed(2));
+          change1d_raw = parseFloat(parseFloat(meta.regularMarketChangePercent).toFixed(2));
         }
 
         results[symbol] = {

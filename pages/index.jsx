@@ -146,6 +146,17 @@ async function _throttle(){
    Liberal approach: accept any valid positive price from Yahoo, no strict ratio check.
    Gracefully degrades: if Yahoo fails for any symbol, Groq estimate is kept. */
 
+// Known currency prefixes — used as whitelist for safe currency replacement
+const KNOWN_CURRENCIES=["₹","£","¥","€","HK$","A$","C$","R$","₩","AED ","SAR ","PKR "];
+// Safe currency swap — only replaces known prefixes, never touches N/A, —, null, or PRICE strings
+function _safeFixPrice(v,yahooPrefix){
+  if(!v||typeof v!=="string")return v;
+  const found=KNOWN_CURRENCIES.find(c=>v.startsWith(c));
+  if(!found)return v; // no known currency prefix — leave unchanged
+  if(found===yahooPrefix)return v; // already correct currency
+  return yahooPrefix+v.slice(found.length); // swap prefix only
+}
+
 // Derive currency symbol from stock exchange suffix — reliable, never depends on Groq output
 function _curForSymbol(sym){
   if(!sym)return"$";
@@ -217,9 +228,11 @@ async function callClaude(prompt,maxTokens=2000,retries=2,cacheKey=null){
       if(!res.ok){
         const eb=await res.json().catch(()=>({}));
         console.error("[callClaude] Groq error",res.status,eb?.error||"");
+        if(eb?.quotaExceeded)throw new Error("⏳ Daily AI quota reached. Cached data still works. Resets at 5:30 AM IST.");
         if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";
       }
       const d=await res.json();
+      if(d.quotaExceeded)throw new Error("⏳ Daily AI quota reached. Cached data still works. Resets at 5:30 AM IST.");
       if(d.error){console.error("[callClaude] API error:",d.error);if(i<retries-1)continue;return "";}
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
@@ -243,9 +256,11 @@ async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2,cacheK
       if(!res.ok){
         const eb=await res.json().catch(()=>({}));
         console.error("[callClaudeJSON] Groq error",res.status,eb?.error||"",eb?.groqType||"");
+        if(eb?.quotaExceeded)throw new Error("⏳ Daily AI quota reached. Cached data still works. Resets at 5:30 AM IST.");
         if([429,503,529].includes(res.status)&&i<retries-1)continue;return "";
       }
       const d=await res.json();
+      if(d.quotaExceeded)throw new Error("⏳ Daily AI quota reached. Cached data still works. Resets at 5:30 AM IST.");
       if(d.error){console.error("[callClaudeJSON] API error:",d.error);if(i<retries-1)continue;return "";}
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
@@ -775,16 +790,28 @@ Return JSON with "stocks" array containing ALL 5 entries. Each entry needs ALL f
   const hasRealNames=arr&&arr.length>=1&&arr[0]?.name&&arr[0].name.length>=2&&!(/^[A-Z0-9]+\.[A-Z]{2}$/.test(arr[0].name));
   if(hasRealNames&&arr[0]?.symbol&&!/^LDR\d$/.test(arr[0].symbol)){
     // Normalize — Groq sometimes returns numbers as strings or vice versa
+    // Clean unfilled placeholders — replace "₹PRICE", "REAL_EVENT" etc. with "—"
+    function _cp(v){if(!v||typeof v!=="string")return v;if(v.includes("PRICE")||v.includes("REAL_"))return"—";return v;}
     const norm=arr.map(s=>({...s,
       // Fix NA prices — use symbol-based estimate if Groq returns NA/null/0
-      price:(s.price&&s.price!=="NA"&&s.price!=="N/A"&&s.price!=="null"&&s.price!=="0")?s.price:s.currentPrice||"—",
+      price:(s.price&&s.price!=="NA"&&s.price!=="N/A"&&s.price!=="null"&&s.price!=="0")?_cp(s.price)||s.currentPrice||"—":s.currentPrice||"—",
+      targetPrice:_cp(s.targetPrice),
+      whyNow:_cp(s.whyNow),
+      catalyst:_cp(s.catalyst),
       change1d_raw:parseFloat(s.change1d_raw)||0,
       change1w_raw:parseFloat(s.change1w_raw)||0,
       change1m_raw:parseFloat(s.change1m_raw)||0,
       signalStrength:parseInt(s.signalStrength)||70,
     }));
-    // Enrich with real Finnhub prices — gracefully degrades if unavailable
+    // Enrich with real Yahoo prices — fix currency mismatch (e.g. ¥→HK$ for 0700.HK)
     const enriched=await fetchRealPrices(norm);
+    // For any stock where Yahoo gave a real price, fix targetPrice currency too
+    // _safeFixPrice only swaps known currency symbols — never corrupts N/A or placeholder text
+    enriched.forEach(s=>{
+      if(!s._priceReal)return;
+      const yahooPrefix=_curForSymbol(s.symbol);
+      s.targetPrice=_safeFixPrice(s.targetPrice,yahooPrefix);
+    });
     enriched._isLive=true; _cs(_mktKey,enriched); return enriched;
   }
   const fb=fbMarkets(target); fb._isLive=false; return fb;
@@ -823,10 +850,22 @@ Return JSON with ALL 5 in picks array:
   const obj=pObj(raw);
   if(obj&&obj.picks&&Array.isArray(obj.picks)&&obj.picks.length>=1&&obj.picks[0]?.symbol&&!/^(PK|T)\d$/.test(obj.picks[0].symbol)){
     // Normalize all pick fields to prevent render crashes
+    // Clean unfilled placeholders — replace "₹PRICE", "REAL_THESIS" etc. with "—"
+    function _cpp(v){if(!v||typeof v!=="string")return v;if(v.includes("PRICE")||v.includes("REAL_"))return"—";return v;}
     obj.picks=obj.picks.filter(p=>p&&p.symbol&&p.rank).map(p=>({...p,
       rsi:parseInt(p.rsi)||55,
       confidence:parseInt(p.confidence)||70,
       signal:(p.signal||"HOLD").toUpperCase(),
+      currentPrice:_cpp(p.currentPrice),
+      targetPrice1m:_cpp(p.targetPrice1m),
+      targetPrice6m:_cpp(p.targetPrice6m),
+      targetPrice1y:_cpp(p.targetPrice1y),
+      supportLevel:_cpp(p.supportLevel),
+      resistanceLevel:_cpp(p.resistanceLevel),
+      stopLoss:_cpp(p.stopLoss),
+      thesis:_cpp(p.thesis),
+      tradingSetup:_cpp(p.tradingSetup),
+      newsDriver:_cpp(p.newsDriver),
       upside1m:p.upside1m!=null?String(p.upside1m):"",
       upside6m:p.upside6m!=null?String(p.upside6m):"",
       upside1y:p.upside1y!=null?String(p.upside1y):"",
@@ -842,7 +881,20 @@ Return JSON with ALL 5 in picks array:
     enriched.forEach(ep=>{
       if(!ep._priceReal)return;
       const pick=obj.picks.find(p=>p.symbol===ep.symbol);
-      if(pick&&ep.price&&ep.price!=="N/A"&&ep.price!==0){pick.currentPrice=ep.price;pick.change1d=ep.change1d;pick._priceReal=true;}
+      if(!pick||!ep.price||ep.price==="N/A"||ep.price===0)return;
+      pick.currentPrice=ep.price;
+      pick.change1d=ep.change1d;
+      pick._priceReal=true;
+      // Fix currency mismatch: Groq used country currency (e.g. ¥ for China)
+      // but HK/other stocks need their own currency (HK$ for .HK stocks)
+      // _safeFixPrice only swaps known currency symbols — never corrupts N/A, —, ¥PRICE etc.
+      const yahooPrefix=_curForSymbol(ep.symbol);
+      pick.targetPrice1m=_safeFixPrice(pick.targetPrice1m,yahooPrefix);
+      pick.targetPrice6m=_safeFixPrice(pick.targetPrice6m,yahooPrefix);
+      pick.targetPrice1y=_safeFixPrice(pick.targetPrice1y,yahooPrefix);
+      pick.supportLevel=_safeFixPrice(pick.supportLevel,yahooPrefix);
+      pick.resistanceLevel=_safeFixPrice(pick.resistanceLevel,yahooPrefix);
+      pick.stopLoss=_safeFixPrice(pick.stopLoss,yahooPrefix);
     });
     obj._isLive=true; _cs(_pkKey,obj); return obj;
   }
@@ -1306,7 +1358,7 @@ function AuthScreen({onLogin,T,isDark}){
             </div>
           </div>
           <div style={{display:"flex",justifyContent:"center",gap:18,fontSize:12,color:T.textD,flexWrap:"wrap"}}>
-            {["📡 Intel","📊 Markets","🎯 Signals","🌍 Map","🔮 Forecasts"].map(x=><span key={x}>{x}</span>)}
+            {["📡 Intel","📊 Markets","🎯 Signals","💹 Assets","🌍 Map","🔮 Forecasts"].map(x=><span key={x}>{x}</span>)}
           </div>
         </div>
 
@@ -1876,6 +1928,266 @@ function PageForecast({country,setCountry,T}){
   );
 }
 
+
+/* ── ASSETS DATA ── */
+const ASSET_SYMBOLS = {
+  crypto: [
+    {symbol:"BTC-USD", name:"Bitcoin",       icon:"₿",  category:"crypto"},
+    {symbol:"ETH-USD", name:"Ethereum",      icon:"Ξ",  category:"crypto"},
+    {symbol:"BNB-USD", name:"BNB",           icon:"◈",  category:"crypto"},
+    {symbol:"SOL-USD", name:"Solana",        icon:"◎",  category:"crypto"},
+    {symbol:"XRP-USD", name:"XRP",           icon:"✕",  category:"crypto"},
+  ],
+  forex: [
+    {symbol:"EURUSD=X", name:"EUR / USD",    icon:"€",  category:"forex", base:"EUR", quote:"USD"},
+    {symbol:"GBPUSD=X", name:"GBP / USD",    icon:"£",  category:"forex", base:"GBP", quote:"USD"},
+    {symbol:"USDJPY=X", name:"USD / JPY",    icon:"¥",  category:"forex", base:"USD", quote:"JPY"},
+    {symbol:"USDINR=X", name:"USD / INR",    icon:"₹",  category:"forex", base:"USD", quote:"INR"},
+    {symbol:"USDCNY=X", name:"USD / CNY",    icon:"¥",  category:"forex", base:"USD", quote:"CNY"},
+  ],
+  commodity: [
+    {symbol:"GC=F",  name:"Gold",           icon:"🥇", category:"commodity", unit:"oz"},
+    {symbol:"SI=F",  name:"Silver",         icon:"🥈", category:"commodity", unit:"oz"},
+    {symbol:"CL=F",  name:"Crude Oil (WTI)",icon:"🛢️", category:"commodity", unit:"bbl"},
+    {symbol:"NG=F",  name:"Natural Gas",    icon:"🔥", category:"commodity", unit:"MMBtu"},
+    {symbol:"HG=F",  name:"Copper",        icon:"🔩", category:"commodity", unit:"lb"},
+  ],
+};
+
+// Browser cache for assets — 5 min TTL (prices change fast)
+const _assetCache = {data:null, t:0};
+const ASSET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function fetchAssets() {
+  // Check browser cache first
+  if (_assetCache.data && Date.now() - _assetCache.t < ASSET_CACHE_TTL) {
+    return _assetCache.data;
+  }
+  try {
+    // Fetch all 15 symbols in one call to prices.js
+    const allSymbols = [
+      ...ASSET_SYMBOLS.crypto,
+      ...ASSET_SYMBOLS.forex,
+      ...ASSET_SYMBOLS.commodity,
+    ].map(a => a.symbol);
+
+    const res = await fetch("/api/prices", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({symbols: allSymbols}),
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const prices = d?.prices || {};
+
+    // Merge prices into asset definitions
+    const merge = (list) => list.map(a => {
+      const p = prices[a.symbol];
+      if (!p || !p.price || p.price <= 0) return {...a, price: null, change1d_raw: 0, isReal: false};
+      return {
+        ...a,
+        price: p.price,
+        change1d_raw: p.change1d_raw || 0,
+        isReal: true,
+      };
+    });
+
+    const cryptoData    = merge(ASSET_SYMBOLS.crypto);
+    const forexData     = merge(ASSET_SYMBOLS.forex);
+    const commodityData = merge(ASSET_SYMBOLS.commodity);
+    const allAssets     = [...cryptoData, ...forexData, ...commodityData];
+    const result = {
+      crypto:    cryptoData,
+      forex:     forexData,
+      commodity: commodityData,
+      _isLive:   allAssets.some(a => a.isReal), // true only if at least 1 price succeeded
+      _fetchedAt: Date.now(),
+    };
+
+    _assetCache.data = result;
+    _assetCache.t = Date.now();
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+/* ── FORMAT ASSET PRICE ── */
+function _fmtAssetPrice(sym, price) {
+  if (!price) return "—";
+  // Crypto — show up to 2 decimal places, or more for sub-cent coins
+  if (sym.endsWith("-USD")) {
+    if (price >= 100)  return "$" + price.toLocaleString("en-US", {maximumFractionDigits: 2});
+    if (price >= 1)    return "$" + price.toFixed(2);
+    if (price >= 0.01) return "$" + price.toFixed(4);
+    return "$" + price.toFixed(6);
+  }
+  // Forex — always 4 decimal places
+  if (sym.endsWith("=X")) {
+    if (sym.includes("JPY") || sym.includes("INR") || sym.includes("CNY"))
+      return price.toFixed(2);
+    return price.toFixed(4);
+  }
+  // Commodity — 2 decimal places with $
+  return "$" + price.toLocaleString("en-US", {maximumFractionDigits: 2});
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE ASSETS
+═══════════════════════════════════════════════════════════ */
+function PageAssets({T}) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const mounted = useRef(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await fetchAssets();
+      if (mounted.current && d) {
+        setData(d);
+        setLastUpdated(new Date());
+      }
+    } catch {}
+    if (mounted.current) setLoading(false);
+  }, []);
+
+  useEffect(() => { mounted.current = true; load(); return () => { mounted.current = false; }; }, [load]);
+
+  const chgColor = (v) => v > 0 ? T.green : v < 0 ? T.red : T.textD;
+  const chgStr  = (v) => { const s=(!v||!isFinite(v))?0:v; return s>0?`▲ +${s.toFixed(2)}%`:s<0?`▼ ${s.toFixed(2)}%`:`→ 0.00%`; };
+
+  const SectionHeader = ({icon, title, subtitle, color}) => (
+    <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14, paddingBottom:10, borderBottom:`1px solid ${T.border}`}}>
+      <span style={{fontSize:22}}>{icon}</span>
+      <div>
+        <div style={{fontSize:14, fontWeight:700, color:T.text, fontFamily:"'JetBrains Mono',monospace", letterSpacing:".06em"}}>{title}</div>
+        <div style={{fontSize:11, color:T.textDD, marginTop:2}}>{subtitle}</div>
+      </div>
+    </div>
+  );
+
+  const AssetRow = ({item, showUnit}) => {
+    const priceStr = _fmtAssetPrice(item.symbol, item.price);
+    const chg = item.change1d_raw || 0;
+    return (
+      <div style={{display:"flex", alignItems:"center", justifyContent:"space-between",
+        padding:"11px 14px", background:T.card, border:`1px solid ${T.border}`,
+        borderRadius:9, marginBottom:7, transition:"border-color .2s"}}
+        onMouseEnter={e=>e.currentTarget.style.borderColor=T.cyan+"44"}
+        onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}
+      >
+        <div style={{display:"flex", alignItems:"center", gap:11}}>
+          <div style={{width:36, height:36, borderRadius:"50%", background:`${chgColor(chg)}14`,
+            border:`1px solid ${chgColor(chg)}33`, display:"flex", alignItems:"center",
+            justifyContent:"center", fontSize:16, fontWeight:700, color:chgColor(chg), flexShrink:0}}>
+            {item.icon}
+          </div>
+          <div>
+            <div style={{fontSize:14, fontWeight:700, color:T.text}}>{item.name}</div>
+            <div style={{fontSize:10, color:T.textDD, fontFamily:"'JetBrains Mono',monospace", marginTop:2}}>
+              {item.symbol}{showUnit ? ` · per ${showUnit}` : ""}
+            </div>
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:16, fontWeight:700, color:T.text, fontFamily:"'JetBrains Mono',monospace"}}>
+            {item.isReal ? priceStr : <span style={{color:T.textDD}}>—</span>}
+          </div>
+          <div style={{fontSize:12, fontWeight:600, color:chgColor(chg), marginTop:3, fontFamily:"'JetBrains Mono',monospace"}}>
+            {item.isReal ? chgStr(chg) : <span style={{color:T.textDD, fontSize:11}}>no data</span>}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const SkRow = () => (
+    <div className="sk" style={{height:60, borderRadius:9, marginBottom:7}}/>
+  );
+
+  return (
+    <div className="page-enter">
+      {/* Header */}
+      <div style={{padding:"22px 26px 14px", borderBottom:`1px solid ${T.border}`}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start"}}>
+          <div>
+            <h2 style={{fontSize:19, fontWeight:700, color:T.text}}>💹 Global Assets</h2>
+            <div style={{fontSize:13, color:T.textD, marginTop:3}}>
+              Live Crypto · Forex · Commodities · Powered by Yahoo Finance
+            </div>
+          </div>
+          <div style={{display:"flex", alignItems:"center", gap:10}}>
+            {lastUpdated && (
+              <div style={{fontSize:10, color:T.textDD, fontFamily:"'JetBrains Mono',monospace", textAlign:"right"}}>
+                <div>UPDATED</div>
+                <div style={{color:T.cyan}}>{lastUpdated.toLocaleTimeString()}</div>
+              </div>
+            )}
+            <button className="btn" onClick={load} disabled={loading}
+              style={{padding:"7px 13px", fontSize:11, border:`1px solid ${T.border}`, borderRadius:7, color:T.textD}}>
+              {loading ? <Loader c={T.cyan} n={3}/> : "↻ REFRESH"}
+            </button>
+          </div>
+        </div>
+        {/* Live badge */}
+        <div style={{marginTop:10, display:"flex", alignItems:"center", gap:6}}>
+          <span style={{width:7, height:7, borderRadius:"50%", background:data?._isLive?T.green:T.textDD, display:"inline-block", boxShadow:data?._isLive?`0 0 6px ${T.green}`:"none"}}/>
+          <span style={{fontSize:10, color:data?._isLive?T.green:T.textDD, fontFamily:"'JetBrains Mono',monospace", letterSpacing:".08em"}}>
+            {data?._isLive ? "● LIVE DATA — 0 AI TOKENS USED" : "○ LOADING..."}
+          </span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{padding:"18px 26px", display:"flex", flexDirection:"column", gap:24}}>
+
+        {/* CRYPTO */}
+        <div>
+          <SectionHeader icon="₿" title="CRYPTOCURRENCY" subtitle="Top 5 by market cap · USD" color={T.yellow}/>
+          {loading
+            ? Array.from({length:5}).map((_,i) => <SkRow key={i}/>)
+            : (data?.crypto || ASSET_SYMBOLS.crypto).map(item => (
+                <AssetRow key={item.symbol} item={item}/>
+              ))
+          }
+        </div>
+
+        {/* FOREX */}
+        <div>
+          <SectionHeader icon="💱" title="FOREX" subtitle="Major currency pairs · Live exchange rates" color={T.cyan}/>
+          {loading
+            ? Array.from({length:5}).map((_,i) => <SkRow key={i}/>)
+            : (data?.forex || ASSET_SYMBOLS.forex).map(item => (
+                <AssetRow key={item.symbol} item={item}/>
+              ))
+          }
+        </div>
+
+        {/* COMMODITY */}
+        <div>
+          <SectionHeader icon="🛢️" title="COMMODITIES" subtitle="Futures prices · USD" color={T.orange}/>
+          {loading
+            ? Array.from({length:5}).map((_,i) => <SkRow key={i}/>)
+            : (data?.commodity || ASSET_SYMBOLS.commodity).map(item => (
+                <AssetRow key={item.symbol} item={item} showUnit={item.unit}/>
+              ))
+          }
+        </div>
+
+        {/* Footer note */}
+        <div style={{padding:"10px 14px", background:`${isDark?"rgba(0,0,0,.2)":"rgba(0,0,0,.04)"}`,
+          border:`1px solid ${T.border}`, borderRadius:8, fontSize:11, color:T.textDD, lineHeight:1.7}}>
+          💡 <strong style={{color:T.textD}}>About this tab:</strong> Prices are fetched directly from Yahoo Finance in real-time.
+          No AI tokens are consumed — this tab never affects your daily quota.
+          Data refreshes every 5 minutes automatically or click ↻ REFRESH for instant update.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════
    DASHBOARD
 ═══════════════════════════════════════════════════════════ */
@@ -1940,6 +2252,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
     {id:"news",  icon:"📡",label:"Intel Feed"},
     {id:"markets",icon:"📈",label:"Markets"},
     {id:"picks", icon:"🎯",label:"Stock Picks"},
+    {id:"assets",icon:"💹",label:"Assets"},
     {id:"map",   icon:"🌍",label:"Global Map"},
     {id:"intel", icon:"⚡",label:"Live Intel"},
     {id:"forecast",icon:"🔮",label:"Forecasts"},
@@ -2067,6 +2380,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
             {page==="picks"   &&<PageStockPicks key={`picks-${country}`}  country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
             {page==="map"     &&<PageMap       onSelect={goMap} T={T}/>}
             {page==="intel"   &&<PageIntel    key={`intel-${country}`}    country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
+            {page==="assets"  &&<PageAssets T={T}/>}
             {page==="forecast"&&<PageForecast key={`forecast-${country}`} country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
           </main>
         </div>

@@ -27,10 +27,10 @@ export default async function handler(req) {
     });
   }
 
-  // Fetch all symbols in parallel — cap at 20 to avoid Yahoo rate limits
+  // Fetch all symbols in parallel — cap at 35 (supports 30 asset symbols + 5 headroom)
   const results = {};
   await Promise.all(
-    symbols.slice(0, 20).map(async (symbol) => {
+    symbols.slice(0, 35).map(async (symbol) => {
       // Guard: must be a non-empty string — reject numbers, objects, null
       if (!symbol || typeof symbol !== 'string') return;
       try {

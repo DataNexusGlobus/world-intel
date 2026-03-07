@@ -240,7 +240,7 @@ async function callClaude(prompt,maxTokens=2000,retries=2,cacheKey=null){
       if(d.error){console.error("[callClaude] API error:",d.error);if(i<retries-1)continue;return "";}
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
-    }catch(e){console.error("[callClaude] Exception:",e.message);if(i<retries-1)continue;return "";}
+    }catch(e){console.error("[callClaude] Exception:",e.message);if(e.message&&e.message.includes("quota"))throw e;if(i<retries-1)continue;return "";}
   }
   return "";
 }
@@ -268,7 +268,7 @@ async function callClaudeJSON(prompt,prefill="{",maxTokens=1200,retries=2,cacheK
       if(d.error){console.error("[callClaudeJSON] API error:",d.error);if(i<retries-1)continue;return "";}
       const t=d.text||"";
       if(t){_cs(ck,t);return t;}
-    }catch(e){console.error("[callClaudeJSON] Exception:",e.message);if(i<retries-1)continue;return "";}
+    }catch(e){console.error("[callClaudeJSON] Exception:",e.message);if(e.message&&e.message.includes("quota"))throw e;if(i<retries-1)continue;return "";}
   }
   return "";
 }
@@ -945,7 +945,7 @@ Return JSON with REAL values for ${t}, no markdown. Use actual country data not 
     if(!obj.interestRate&&obj.interest_rate)obj.interestRate=obj.interest_rate;
     if(!obj.country)obj.country=t;
     if(!obj.economicOutlook&&obj.outlook)obj.economicOutlook=obj.outlook;
-    if(obj.gdpGrowth||obj.inflation||obj.gdpGrowth||obj.unemployment||obj.interestRate){obj._isLive=true; _cs(_fcKey,obj); return obj;}
+    if(obj.gdpGrowth||obj.inflation||obj.unemployment||obj.interestRate||obj.sixMonthPrediction){obj._isLive=true; _cs(_fcKey,obj); return obj;}
   }
   const fb=fbForecast(t);fb._isLive=false;return fb;
 }
@@ -1085,7 +1085,7 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
   }
   #header-logo{
     position:absolute!important;
-    left:50%!important;
+    left:44%!important;
     transform:translateX(-50%)!important;
     pointer-events:none;
   }
@@ -1139,7 +1139,7 @@ function Pulse({c,s=7}){return <span style={{position:"relative",display:"inline
 function Loader({c,n=3,sz=5}){return <span style={{display:"inline-flex",gap:4,alignItems:"center"}}>{Array.from({length:n}).map((_,i)=><span key={i} style={{width:sz,height:sz,borderRadius:"50%",background:c,animation:`blink 1.3s ${i*.18}s infinite`}}/>)}</span>;}
 function SkRow({h=56,mb=6}){return <div className="sk" style={{height:h,marginBottom:mb}}/>;}
 function SignalBadge({sig}){const s=(sig||"HOLD").toUpperCase();const cl=s==="STRONG BUY"?"signal-sbuy":s==="BUY"?"signal-buy":s==="HOLD"?"signal-hold":s==="SELL"?"signal-sell":"signal-ssell";return <span className={`tag ${cl}`}>{s}</span>;}
-function ChangeChip({v,prefix="",T}){if(!v||v==="N/A")return <span style={{color:T.textDD,fontSize:12}}>—</span>;const n=parseFloat(v);const up=n>0;const zero=n===0||Object.is(n,-0);return <span style={{color:zero?T.textD:up?T.green:T.red,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700}}>{zero?"→":up?"▲":"▼"} {prefix}{v.replace(/[+-]/g,"")}</span>;}
+function ChangeChip({v,prefix="",T}){if(!v||v==="N/A")return <span style={{color:T.textDD,fontSize:12}}>—</span>;const n=parseFloat(v);if(isNaN(n))return <span style={{color:T.textDD,fontSize:12}}>—</span>;const up=n>0;const zero=n===0||Object.is(n,-0);return <span style={{color:zero?T.textD:up?T.green:T.red,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700}}>{zero?"→":up?"▲":"▼"} {prefix}{v.replace(/[+-]/g,"")}</span>;}
 function ScoreBar({val=0,color,T}){return <div style={{height:4,background:T?`rgba(${val>50?"0,0,0":"0,0,0"}`:"rgba(255,255,255,0.06)",borderRadius:2,overflow:"hidden",marginTop:4,backgroundColor:"rgba(128,128,128,0.12)"}}><div style={{width:`${Math.min(100,Math.max(0,val))}%`,height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div>;}
 function InfoCard({label,value,color,sub,T}){return <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:6}}>{label}</div><div style={{fontSize:18,fontWeight:700,color}}>{value||"—"}</div>{sub&&<div style={{marginTop:4}}>{sub}</div>}</div>;}
 
@@ -1628,7 +1628,7 @@ function PageStockPicks({country,setCountry,T}){
                 {[["SENTIMENT",data.marketSentiment?.toUpperCase(),sentC(data.marketSentiment)],["BULL SCORE",data.sentimentScore,scoreC(data.sentimentScore)],["FEAR/GREED",data.fearGreedIndex,scoreC(data.fearGreedIndex)],["INDEX",null,T.text]].map(([l,v,c],li)=>(
                   <div key={l} style={{background:T.card,border:`1px solid ${c}22`,borderRadius:10,padding:"13px 14px",textAlign:"center"}}>
                     <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{l}</div>
-                    {li===3?<><div style={{fontSize:12,fontWeight:700,color:T.text}}>{data.index||idx}</div><div style={{display:"flex",gap:8,justifyContent:"center",marginTop:5,flexWrap:"wrap"}}><ChangeChip v={data.indexChange1d} prefix="1D " T={T}/><ChangeChip v={data.indexChange1w} prefix="1W " T={T}/></div></>:<><div style={{fontSize:li===0?14:24,fontWeight:li===0?700:900,color:c}}>{v||"—"}</div><ScoreBar val={typeof v==="number"?v:0} color={c} T={T}/></>}
+                    {li===3?<><div style={{fontSize:12,fontWeight:700,color:T.text}}>{data.index||idx}</div><div style={{display:"flex",gap:8,justifyContent:"center",marginTop:5,flexWrap:"wrap"}}><ChangeChip v={data.indexChange1d} prefix="1D " T={T}/><ChangeChip v={data.indexChange1w} prefix="1W " T={T}/></div></>:<><div style={{fontSize:li===0?14:24,fontWeight:li===0?700:900,color:c}}>{v||"—"}</div><ScoreBar val={typeof v==="number"?v:parseInt(v)||0} color={c} T={T}/></>}
                   </div>
                 ))}
               </div>
@@ -1814,8 +1814,8 @@ function PageIntel({country,setCountry,T}){
         <AsyncBlock key={target} loadFn={useCallback(()=>fetchIntel(target),[target])} color={T.orange} successCheck={d=>d?.alerts} T={T}>
           {data=>{
             // Use live intel data if available, else fall back to dot's default tl
-            const liveTl=data&&data.threatLevel?data.threatLevel:dot.tl;
-            const tc=THREAT_C[liveTl]||mapThreatColor(dot.tl,T);
+            const liveTl=data&&data.threatLevel?(data.threatLevel).toLowerCase():"moderate";
+            const tc=THREAT_C[liveTl]||mapThreatColor("moderate",T);
             return(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{padding:"16px 20px",borderRadius:11,background:`${tc}10`,border:`1px solid ${tc}33`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
@@ -2253,7 +2253,6 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
             style={{display:"none",background:"transparent",
               border:"1.5px solid rgba(245,196,0,0.85)",borderRadius:8,
               padding:"8px 10px",cursor:"pointer",flexShrink:0,lineHeight:1,
-              boxShadow:"0 0 4px rgba(245,196,0,0.2)",
               zIndex:2,position:"relative"}}
             aria-label="Menu">
             <div style={{display:"flex",flexDirection:"column",gap:"5px",alignItems:"center",justifyContent:"center",width:20}}>
@@ -2264,7 +2263,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
           </button>
 
           {/* Logo */}
-          <div id="header-logo" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0,position:"absolute",left:"50%",transform:"translateX(-50%)"}}>
+          <div id="header-logo" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0,position:"absolute",left:"44%",transform:"translateX(-50%)"}}>
             <LogoSVG size={32}/>
             <div style={{minWidth:0}}>
               <div style={{fontFamily:"'Orbitron',monospace",fontSize:11,fontWeight:900,color:T.cyan,
@@ -2280,7 +2279,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
           <div className="mob-hide" style={{flex:1,display:"flex",gap:6,maxWidth:400,minWidth:0}}>
             <input className="input-field"
               style={{border:`1px solid ${T.border}`,fontSize:12,padding:"6px 11px",minWidth:0,flex:1}}
-              defaultValue={searchVal}
+              value={searchVal}
               onChange={e=>setSearch(e.target.value)}
               onInput={e=>setSearch(e.target.value)}
               onKeyUp={e=>{setSearch(e.target.value);if(e.key==="Enter")applySearch();}}
@@ -2417,7 +2416,7 @@ export default function App(){
       if(sb?.user){
         const meta=sb.user.user_metadata||{};
         setSess({
-          username:meta.username||sb.user.email.split("@")[0],
+          username:meta.username||(sb.user.email||"user").split("@")[0],
           email:sb.user.email,
           tz:meta.tz||Intl.DateTimeFormat().resolvedOptions().timeZone,
           id:sb.user.id
@@ -2434,7 +2433,7 @@ export default function App(){
       if(sb?.user){
         const meta=sb.user.user_metadata||{};
         setSess({
-          username:meta.username||sb.user.email.split("@")[0],
+          username:meta.username||(sb.user.email||"user").split("@")[0],
           email:sb.user.email,
           tz:meta.tz||Intl.DateTimeFormat().resolvedOptions().timeZone,
           id:sb.user.id

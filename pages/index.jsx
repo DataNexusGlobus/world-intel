@@ -193,8 +193,12 @@ async function fetchRealPrices(stocks){
       const p=prices[s.symbol];
       // If Yahoo didn't return this symbol — keep Groq data
       if(!p||!p.isReal||!p.price||p.price<=0)return s;
-      // Get currency from symbol suffix — never from Groq string (avoids "₹PRICE" bug)
-      const cur=_curForSymbol(s.symbol);
+      // Get currency from the stock's existing Groq price string
+      // This preserves country currency (e.g. ¥ for China even for HK-listed stocks)
+      // Fall back to symbol-based currency only if Groq price string is missing/placeholder
+      const groqPrice=s.price||s.currentPrice||"";
+      const foundPrefix=KNOWN_CURRENCIES.find(cc=>groqPrice.startsWith(cc));
+      const cur=foundPrefix||_curForSymbol(s.symbol);
       // Format: Indian locale for ₹ (1,234.56), standard for others
       const formatted=cur+p.price.toLocaleString(
         cur==="₹"?"en-IN":"en-US",
@@ -805,13 +809,7 @@ Return JSON with "stocks" array containing ALL 5 entries. Each entry needs ALL f
     }));
     // Enrich with real Yahoo prices — fix currency mismatch (e.g. ¥→HK$ for 0700.HK)
     const enriched=await fetchRealPrices(norm);
-    // For any stock where Yahoo gave a real price, fix targetPrice currency too
-    // _safeFixPrice only swaps known currency symbols — never corrupts N/A or placeholder text
-    enriched.forEach(s=>{
-      if(!s._priceReal)return;
-      const yahooPrefix=_curForSymbol(s.symbol);
-      s.targetPrice=_safeFixPrice(s.targetPrice,yahooPrefix);
-    });
+    // targetPrice left as Groq generated — consistent country currency (e.g. ¥ for all China stocks)
     enriched._isLive=true; _cs(_mktKey,enriched); return enriched;
   }
   const fb=fbMarkets(target); fb._isLive=false; return fb;
@@ -885,16 +883,8 @@ Return JSON with ALL 5 in picks array:
       pick.currentPrice=ep.price;
       pick.change1d=ep.change1d;
       pick._priceReal=true;
-      // Fix currency mismatch: Groq used country currency (e.g. ¥ for China)
-      // but HK/other stocks need their own currency (HK$ for .HK stocks)
-      // _safeFixPrice only swaps known currency symbols — never corrupts N/A, —, ¥PRICE etc.
-      const yahooPrefix=_curForSymbol(ep.symbol);
-      pick.targetPrice1m=_safeFixPrice(pick.targetPrice1m,yahooPrefix);
-      pick.targetPrice6m=_safeFixPrice(pick.targetPrice6m,yahooPrefix);
-      pick.targetPrice1y=_safeFixPrice(pick.targetPrice1y,yahooPrefix);
-      pick.supportLevel=_safeFixPrice(pick.supportLevel,yahooPrefix);
-      pick.resistanceLevel=_safeFixPrice(pick.resistanceLevel,yahooPrefix);
-      pick.stopLoss=_safeFixPrice(pick.stopLoss,yahooPrefix);
+      // All other price fields (targets, support, resistance, stopLoss) kept as Groq generated
+      // This ensures consistent country currency — ¥ for all China stocks, ₹ for India etc.
     });
     obj._isLive=true; _cs(_pkKey,obj); return obj;
   }
@@ -1149,7 +1139,7 @@ function Pulse({c,s=7}){return <span style={{position:"relative",display:"inline
 function Loader({c,n=3,sz=5}){return <span style={{display:"inline-flex",gap:4,alignItems:"center"}}>{Array.from({length:n}).map((_,i)=><span key={i} style={{width:sz,height:sz,borderRadius:"50%",background:c,animation:`blink 1.3s ${i*.18}s infinite`}}/>)}</span>;}
 function SkRow({h=56,mb=6}){return <div className="sk" style={{height:h,marginBottom:mb}}/>;}
 function SignalBadge({sig}){const s=(sig||"HOLD").toUpperCase();const cl=s==="STRONG BUY"?"signal-sbuy":s==="BUY"?"signal-buy":s==="HOLD"?"signal-hold":s==="SELL"?"signal-sell":"signal-ssell";return <span className={`tag ${cl}`}>{s}</span>;}
-function ChangeChip({v,prefix="",T}){if(!v||v==="N/A")return <span style={{color:T.textDD,fontSize:12}}>—</span>;const n=parseFloat(v);const up=n>=0;return <span style={{color:up?T.green:T.red,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700}}>{up?"▲":"▼"} {prefix}{v.replace(/[+-]/g,"")}</span>;}
+function ChangeChip({v,prefix="",T}){if(!v||v==="N/A")return <span style={{color:T.textDD,fontSize:12}}>—</span>;const n=parseFloat(v);const up=n>0;const zero=n===0||Object.is(n,-0);return <span style={{color:zero?T.textD:up?T.green:T.red,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700}}>{zero?"→":up?"▲":"▼"} {prefix}{v.replace(/[+-]/g,"")}</span>;}
 function ScoreBar({val=0,color,T}){return <div style={{height:4,background:T?`rgba(${val>50?"0,0,0":"0,0,0"}`:"rgba(255,255,255,0.06)",borderRadius:2,overflow:"hidden",marginTop:4,backgroundColor:"rgba(128,128,128,0.12)"}}><div style={{width:`${Math.min(100,Math.max(0,val))}%`,height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div>;}
 function InfoCard({label,value,color,sub,T}){return <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:6}}>{label}</div><div style={{fontSize:18,fontWeight:700,color}}>{value||"—"}</div>{sub&&<div style={{marginTop:4}}>{sub}</div>}</div>;}
 
@@ -1678,7 +1668,7 @@ function PageStockPicks({country,setCountry,T}){
                         <div key={l} style={{background:`${isDark?"rgba(0,0,0,.2)":"rgba(0,0,0,.04)"}`,borderRadius:8,padding:"10px 11px",textAlign:"center"}}>
                           <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:4}}>{l}</div>
                           <div style={{fontSize:14,fontWeight:700,color:c,fontFamily:"'JetBrains Mono',monospace"}}>{v||"—"}</div>
-                          {us&&<div style={{fontSize:11,color:us.startsWith("+")||us.startsWith("+")?T.green:us.startsWith("-")?T.red:T.green,marginTop:2,fontFamily:"'JetBrains Mono',monospace"}}>{us}</div>}
+                          {us&&<div style={{fontSize:11,color:(!us.startsWith("-"))?T.green:T.red,marginTop:2,fontFamily:"'JetBrains Mono',monospace"}}>{us}</div>}
                         </div>
                       );})}
                     </div>
@@ -1899,7 +1889,7 @@ function PageForecast({country,setCountry,T}){
                   ))}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7}}>
-                  {[["GDP Growth",data.gdpGrowth,T.green],["Inflation",data.inflation,T.yellow],["Unemployment",data.unemployment,T.orange],["Interest Rate",data.interestRate,T.cyan]].map(([l,v,c])=>v&&(
+                  {[["GDP Growth",data.gdpGrowth,T.green],["Inflation",data.inflation,T.yellow],["Unemployment",data.unemployment,T.orange],["Interest Rate",data.interestRate,T.cyan]].map(([l,v,c])=>v!=null&&(
                     <div key={l} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"11px 13px",textAlign:"center"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{l}</div><div style={{fontSize:15,fontWeight:700,color:c,fontFamily:"'JetBrains Mono',monospace"}}>{v}</div></div>
                   ))}
                 </div>
@@ -1932,25 +1922,40 @@ function PageForecast({country,setCountry,T}){
 /* ── ASSETS DATA ── */
 const ASSET_SYMBOLS = {
   crypto: [
-    {symbol:"BTC-USD", name:"Bitcoin",       icon:"₿",  category:"crypto"},
-    {symbol:"ETH-USD", name:"Ethereum",      icon:"Ξ",  category:"crypto"},
-    {symbol:"BNB-USD", name:"BNB",           icon:"◈",  category:"crypto"},
-    {symbol:"SOL-USD", name:"Solana",        icon:"◎",  category:"crypto"},
-    {symbol:"XRP-USD", name:"XRP",           icon:"✕",  category:"crypto"},
+    {symbol:"BTC-USD",  name:"Bitcoin",          icon:"₿",  category:"crypto"},
+    {symbol:"ETH-USD",  name:"Ethereum",         icon:"Ξ",  category:"crypto"},
+    {symbol:"BNB-USD",  name:"BNB",              icon:"◈",  category:"crypto"},
+    {symbol:"SOL-USD",  name:"Solana",           icon:"◎",  category:"crypto"},
+    {symbol:"XRP-USD",  name:"XRP",              icon:"✕",  category:"crypto"},
+    {symbol:"ADA-USD",  name:"Cardano",          icon:"₳",  category:"crypto"},
+    {symbol:"AVAX-USD", name:"Avalanche",        icon:"▲",  category:"crypto"},
+    {symbol:"DOGE-USD", name:"Dogecoin",         icon:"Ð",  category:"crypto"},
+    {symbol:"DOT-USD",  name:"Polkadot",         icon:"●",  category:"crypto"},
+    {symbol:"MATIC-USD",name:"Polygon",          icon:"⬡",  category:"crypto"},
   ],
   forex: [
-    {symbol:"EURUSD=X", name:"EUR / USD",    icon:"€",  category:"forex", base:"EUR", quote:"USD"},
-    {symbol:"GBPUSD=X", name:"GBP / USD",    icon:"£",  category:"forex", base:"GBP", quote:"USD"},
-    {symbol:"USDJPY=X", name:"USD / JPY",    icon:"¥",  category:"forex", base:"USD", quote:"JPY"},
-    {symbol:"USDINR=X", name:"USD / INR",    icon:"₹",  category:"forex", base:"USD", quote:"INR"},
-    {symbol:"USDCNY=X", name:"USD / CNY",    icon:"¥",  category:"forex", base:"USD", quote:"CNY"},
+    {symbol:"EURUSD=X", name:"EUR / USD",   icon:"€",  category:"forex"},
+    {symbol:"GBPUSD=X", name:"GBP / USD",   icon:"£",  category:"forex"},
+    {symbol:"USDJPY=X", name:"USD / JPY",   icon:"¥",  category:"forex"},
+    {symbol:"USDINR=X", name:"USD / INR",   icon:"₹",  category:"forex"},
+    {symbol:"USDCNY=X", name:"USD / CNY",   icon:"¥",  category:"forex"},
+    {symbol:"USDCHF=X", name:"USD / CHF",   icon:"₣",  category:"forex"},
+    {symbol:"AUDUSD=X", name:"AUD / USD",   icon:"A$", category:"forex"},
+    {symbol:"USDCAD=X", name:"USD / CAD",   icon:"C$", category:"forex"},
+    {symbol:"USDBRL=X", name:"USD / BRL",   icon:"R$", category:"forex"},
+    {symbol:"USDAED=X", name:"USD / AED",   icon:"د",  category:"forex"},
   ],
   commodity: [
-    {symbol:"GC=F",  name:"Gold",           icon:"🥇", category:"commodity", unit:"oz"},
-    {symbol:"SI=F",  name:"Silver",         icon:"🥈", category:"commodity", unit:"oz"},
-    {symbol:"CL=F",  name:"Crude Oil (WTI)",icon:"🛢️", category:"commodity", unit:"bbl"},
-    {symbol:"NG=F",  name:"Natural Gas",    icon:"🔥", category:"commodity", unit:"MMBtu"},
-    {symbol:"HG=F",  name:"Copper",        icon:"🔩", category:"commodity", unit:"lb"},
+    {symbol:"GC=F",  name:"Gold",            icon:"🥇", category:"commodity", unit:"oz"},
+    {symbol:"SI=F",  name:"Silver",          icon:"🥈", category:"commodity", unit:"oz"},
+    {symbol:"CL=F",  name:"Crude Oil (WTI)", icon:"🛢️", category:"commodity", unit:"bbl"},
+    {symbol:"BZ=F",  name:"Brent Crude",     icon:"🛢️", category:"commodity", unit:"bbl"},
+    {symbol:"NG=F",  name:"Natural Gas",     icon:"🔥", category:"commodity", unit:"MMBtu"},
+    {symbol:"HG=F",  name:"Copper",          icon:"🔩", category:"commodity", unit:"lb"},
+    {symbol:"ZW=F",  name:"Wheat",           icon:"🌾", category:"commodity", unit:"bu"},
+    {symbol:"ZC=F",  name:"Corn",            icon:"🌽", category:"commodity", unit:"bu"},
+    {symbol:"PL=F",  name:"Platinum",        icon:"⬜", category:"commodity", unit:"oz"},
+    {symbol:"PA=F",  name:"Palladium",       icon:"◻",  category:"commodity", unit:"oz"},
   ],
 };
 
@@ -1964,7 +1969,7 @@ async function fetchAssets() {
     return _assetCache.data;
   }
   try {
-    // Fetch all 15 symbols in one call to prices.js
+    // Fetch all 30 symbols in one call to prices.js (10 crypto + 10 forex + 10 commodity)
     const allSymbols = [
       ...ASSET_SYMBOLS.crypto,
       ...ASSET_SYMBOLS.forex,
@@ -2036,19 +2041,17 @@ function _fmtAssetPrice(sym, price) {
    PAGE ASSETS
 ═══════════════════════════════════════════════════════════ */
 function PageAssets({T}) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData]           = useState(null);
+  const [loading, setLoading]     = useState(true);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [activeTab, setActiveTab] = useState("crypto"); // "crypto" | "forex" | "commodity"
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const d = await fetchAssets();
-      if (mounted.current && d) {
-        setData(d);
-        setLastUpdated(new Date());
-      }
+      if (mounted.current && d) { setData(d); setLastUpdated(new Date()); }
     } catch {}
     if (mounted.current) setLoading(false);
   }, []);
@@ -2056,38 +2059,37 @@ function PageAssets({T}) {
   useEffect(() => { mounted.current = true; load(); return () => { mounted.current = false; }; }, [load]);
 
   const chgColor = (v) => v > 0 ? T.green : v < 0 ? T.red : T.textD;
-  const chgStr  = (v) => { const s=(!v||!isFinite(v))?0:v; return s>0?`▲ +${s.toFixed(2)}%`:s<0?`▼ ${s.toFixed(2)}%`:`→ 0.00%`; };
+  const chgStr   = (v) => { const s=(!v||!isFinite(v))?0:v; return s>0?`▲ +${s.toFixed(2)}%`:s<0?`▼ ${s.toFixed(2)}%`:`→ 0.00%`; };
 
-  const SectionHeader = ({icon, title, subtitle, color}) => (
-    <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:14, paddingBottom:10, borderBottom:`1px solid ${T.border}`}}>
-      <span style={{fontSize:22}}>{icon}</span>
-      <div>
-        <div style={{fontSize:14, fontWeight:700, color:T.text, fontFamily:"'JetBrains Mono',monospace", letterSpacing:".06em"}}>{title}</div>
-        <div style={{fontSize:11, color:T.textDD, marginTop:2}}>{subtitle}</div>
-      </div>
-    </div>
-  );
+  // Tab config
+  const TABS = [
+    {id:"crypto",    label:"₿ Crypto",      color:T.yellow,  subtitle:"Top 10 by market cap · USD"},
+    {id:"forex",     label:"💱 Forex",       color:T.cyan,    subtitle:"Major currency pairs · Live rates"},
+    {id:"commodity", label:"🛢️ Commodities", color:T.orange,  subtitle:"Futures prices · USD"},
+  ];
+  const activeTabCfg = TABS.find(t => t.id === activeTab) || TABS[0];
 
-  const AssetRow = ({item, showUnit}) => {
+  const AssetRow = ({item}) => {
     const priceStr = _fmtAssetPrice(item.symbol, item.price);
     const chg = item.change1d_raw || 0;
     return (
       <div style={{display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"11px 14px", background:T.card, border:`1px solid ${T.border}`,
+        padding:"12px 15px", background:T.card, border:`1px solid ${T.border}`,
         borderRadius:9, marginBottom:7, transition:"border-color .2s"}}
-        onMouseEnter={e=>e.currentTarget.style.borderColor=T.cyan+"44"}
+        onMouseEnter={e=>e.currentTarget.style.borderColor=activeTabCfg.color+"44"}
         onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}
       >
-        <div style={{display:"flex", alignItems:"center", gap:11}}>
-          <div style={{width:36, height:36, borderRadius:"50%", background:`${chgColor(chg)}14`,
-            border:`1px solid ${chgColor(chg)}33`, display:"flex", alignItems:"center",
-            justifyContent:"center", fontSize:16, fontWeight:700, color:chgColor(chg), flexShrink:0}}>
+        <div style={{display:"flex", alignItems:"center", gap:12}}>
+          <div style={{width:38, height:38, borderRadius:"50%",
+            background:`${chgColor(chg)}14`, border:`1px solid ${chgColor(chg)}33`,
+            display:"flex", alignItems:"center", justifyContent:"center",
+            fontSize:16, fontWeight:700, color:chgColor(chg), flexShrink:0}}>
             {item.icon}
           </div>
           <div>
             <div style={{fontSize:14, fontWeight:700, color:T.text}}>{item.name}</div>
             <div style={{fontSize:10, color:T.textDD, fontFamily:"'JetBrains Mono',monospace", marginTop:2}}>
-              {item.symbol}{showUnit ? ` · per ${showUnit}` : ""}
+              {item.symbol}{item.unit ? ` · per ${item.unit}` : ""}
             </div>
           </div>
         </div>
@@ -2103,19 +2105,20 @@ function PageAssets({T}) {
     );
   };
 
-  const SkRow = () => (
-    <div className="sk" style={{height:60, borderRadius:9, marginBottom:7}}/>
-  );
+  const SkRow = () => <div className="sk" style={{height:63, borderRadius:9, marginBottom:7}}/>;
+
+  // Active list to render
+  const activeList = data?.[activeTab] || ASSET_SYMBOLS[activeTab];
 
   return (
     <div className="page-enter">
       {/* Header */}
       <div style={{padding:"22px 26px 14px", borderBottom:`1px solid ${T.border}`}}>
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start"}}>
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16}}>
           <div>
             <h2 style={{fontSize:19, fontWeight:700, color:T.text}}>💹 Global Assets</h2>
             <div style={{fontSize:13, color:T.textD, marginTop:3}}>
-              Live Crypto · Forex · Commodities · Powered by Yahoo Finance
+              {activeTabCfg.subtitle}
             </div>
           </div>
           <div style={{display:"flex", alignItems:"center", gap:10}}>
@@ -2131,58 +2134,31 @@ function PageAssets({T}) {
             </button>
           </div>
         </div>
-        {/* Live badge */}
-        <div style={{marginTop:10, display:"flex", alignItems:"center", gap:6}}>
-          <span style={{width:7, height:7, borderRadius:"50%", background:data?._isLive?T.green:T.textDD, display:"inline-block", boxShadow:data?._isLive?`0 0 6px ${T.green}`:"none"}}/>
-          <span style={{fontSize:10, color:data?._isLive?T.green:T.textDD, fontFamily:"'JetBrains Mono',monospace", letterSpacing:".08em"}}>
-            {data?._isLive ? "● LIVE DATA — 0 AI TOKENS USED" : "○ LOADING..."}
-          </span>
+
+        {/* Category tabs */}
+        <div style={{display:"flex", gap:8, flexWrap:"wrap"}}>
+          {TABS.map(tab => (
+            <button key={tab.id} className="btn" onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding:"8px 18px", fontSize:12, borderRadius:8,
+                border:`1px solid ${activeTab===tab.id ? tab.color+"55" : T.border}`,
+                background: activeTab===tab.id ? `${tab.color}12` : "transparent",
+                color: activeTab===tab.id ? tab.color : T.textDD,
+                fontWeight: activeTab===tab.id ? 700 : 500,
+                transition:"all .18s",
+              }}>
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{padding:"18px 26px", display:"flex", flexDirection:"column", gap:24}}>
-
-        {/* CRYPTO */}
-        <div>
-          <SectionHeader icon="₿" title="CRYPTOCURRENCY" subtitle="Top 5 by market cap · USD" color={T.yellow}/>
-          {loading
-            ? Array.from({length:5}).map((_,i) => <SkRow key={i}/>)
-            : (data?.crypto || ASSET_SYMBOLS.crypto).map(item => (
-                <AssetRow key={item.symbol} item={item}/>
-              ))
-          }
-        </div>
-
-        {/* FOREX */}
-        <div>
-          <SectionHeader icon="💱" title="FOREX" subtitle="Major currency pairs · Live exchange rates" color={T.cyan}/>
-          {loading
-            ? Array.from({length:5}).map((_,i) => <SkRow key={i}/>)
-            : (data?.forex || ASSET_SYMBOLS.forex).map(item => (
-                <AssetRow key={item.symbol} item={item}/>
-              ))
-          }
-        </div>
-
-        {/* COMMODITY */}
-        <div>
-          <SectionHeader icon="🛢️" title="COMMODITIES" subtitle="Futures prices · USD" color={T.orange}/>
-          {loading
-            ? Array.from({length:5}).map((_,i) => <SkRow key={i}/>)
-            : (data?.commodity || ASSET_SYMBOLS.commodity).map(item => (
-                <AssetRow key={item.symbol} item={item} showUnit={item.unit}/>
-              ))
-          }
-        </div>
-
-        {/* Footer note */}
-        <div style={{padding:"10px 14px", background:`${isDark?"rgba(0,0,0,.2)":"rgba(0,0,0,.04)"}`,
-          border:`1px solid ${T.border}`, borderRadius:8, fontSize:11, color:T.textDD, lineHeight:1.7}}>
-          💡 <strong style={{color:T.textD}}>About this tab:</strong> Prices are fetched directly from Yahoo Finance in real-time.
-          No AI tokens are consumed — this tab never affects your daily quota.
-          Data refreshes every 5 minutes automatically or click ↻ REFRESH for instant update.
-        </div>
+      {/* List */}
+      <div style={{padding:"18px 26px"}}>
+        {loading
+          ? Array.from({length:10}).map((_,i) => <SkRow key={i}/>)
+          : activeList.map(item => <AssetRow key={item.symbol} item={item}/>)
+        }
       </div>
     </div>
   );
@@ -2242,7 +2218,9 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
 
   // Preload removed — was flooding Groq rate limits
 
-  const tz=session.tz||Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const _rawTz=session.tz||Intl.DateTimeFormat().resolvedOptions().timeZone;
+  let tz=_rawTz;
+  try{new Intl.DateTimeFormat("en",{timeZone:_rawTz});}catch{tz="UTC";} // guard invalid tz string
   const timeStr=new Intl.DateTimeFormat("en",{timeZone:tz,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date(clock));
   const dateStr=new Intl.DateTimeFormat("en",{timeZone:tz,weekday:"short",month:"short",day:"numeric"}).format(new Date(clock));
 

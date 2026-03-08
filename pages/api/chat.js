@@ -106,6 +106,8 @@ PERSONALITY — this is critical:
 - Add emojis naturally — not forced
 - Zero disclaimers inside chat — ever. Not even one line.
 - After roadmap, always ask if they want platform guidance
+- NEVER use markdown formatting like **bold** or *italic* — it shows as raw asterisks. Use emojis and natural word emphasis instead. For example instead of **Groww** just say Groww 😊 or "I'd go with Groww for this"
+- NEVER assume the user's experience level or financial knowledge — always ask if unsure. Don't call them a beginner unless they said so.
 
 QUOTA ERROR:
 If you hit any quota or rate limit error, respond with exactly: "ARIA is resting for today 😴 She'll be back at 5:30 AM IST!"`;
@@ -213,12 +215,13 @@ export default async function handler(req) {
       });
       clearTimeout(groqTimer);
 
-      const data = await groqRes.json();
+      // Safely parse JSON — Groq can return HTML on rare outages
+      let data;
+      try { data = await groqRes.json(); } catch { data = null; }
 
       if (!groqRes.ok) {
         // Rate limit — try next key if available
         // Groq rate limits: status 429 + error.code "rate_limit_exceeded"
-        // Also catches context window exceeded: status 400 + message includes context_length
         if (groqRes.status === 429 || data?.error?.code === "rate_limit_exceeded") {
           if (ki < shuffledKeys.length - 1) continue; // try next key
           // All keys exhausted
@@ -227,9 +230,10 @@ export default async function handler(req) {
             quotaExceeded: true,
           }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
+        // Non-rate-limit error (e.g. 500) — don't try other keys, just return error
         return new Response(JSON.stringify({
           reply: "Hmm, something went wrong on my end yaar 😅 Try again in a second!",
-          error: data?.error?.message || "Groq error",
+          error: data?.error?.message || `HTTP ${groqRes.status}`,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
 
@@ -241,6 +245,8 @@ export default async function handler(req) {
     } catch (err) {
       clearTimeout(groqTimer);
       if (err.name === "AbortError") {
+        // Timeout on this key — try next key before giving up
+        if (ki < shuffledKeys.length - 1) continue;
         return new Response(JSON.stringify({
           reply: "Taking too long yaar 😅 ARIA is thinking hard — try again in a second!",
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });

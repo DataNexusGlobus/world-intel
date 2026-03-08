@@ -1,15 +1,20 @@
 // pages/api/chat.js — ARIA Personal Financial Advisor backend
-// Separate from /api/claude.js — uses ARIA_chatbot env var (isolated quota)
+// Separate from /api/claude.js — uses ARIA_chatbot keys (isolated quota from data tabs)
 // Model: llama-3.1-8b-instant — 500k TPD, 20k TPM, handles ~10-12 concurrent users
+// Multi-key rotation: ARIA_chatbot, ARIA_chatbot_2 … ARIA_chatbot_5 (5 keys = ~2.5M TPD)
 // Tavily called every message for live market context
 export const config = { runtime: 'edge' };
 
 // ── TAVILY SEARCH ─────────────────────────────────────────────────────────────
 async function getTavilyContext(query, tavilyKey) {
   if (!tavilyKey) return "";
+  // 5s timeout — Edge limit is 25s, Groq needs ~3-5s, leave rest for Tavily
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 5000);
   try {
     const res = await fetch("https://api.tavily.com/search", {
       method: "POST",
+      signal: ctrl.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         api_key: tavilyKey,
@@ -20,16 +25,18 @@ async function getTavilyContext(query, tavilyKey) {
         include_raw_content: false,
       }),
     });
+    clearTimeout(timer);
     if (!res.ok) return "";
     const data = await res.json();
     const parts = [];
     if (data.answer) parts.push("SUMMARY: " + data.answer);
     (data.results || []).slice(0, 3).forEach(r => {
-      if (r.content) parts.push(`[${r.title}]: ${r.content.slice(0, 250)}`);
+      if (r.content) parts.push(`[${r.title||"Source"}]: ${r.content.slice(0, 250)}`);
     });
     return parts.join("\n").slice(0, 800);
   } catch {
-    return "";
+    clearTimeout(timer);
+    return ""; // silent fallback — Tavily timeout or failure, ARIA uses model knowledge
   }
 }
 
@@ -71,6 +78,11 @@ INVESTMENT OPTIONS — always think beyond just stocks. Consider ALL of these ba
 - Government Bonds / T-Bills (safe, underused)
 - Chit Funds (only for specific regions where relevant)
 
+DIRECT STOCKS — CRITICAL RULE:
+Whenever you recommend or mention direct stocks in your response, you MUST immediately follow up by asking the user about specific companies. Do this naturally, like:
+"By the way, for the direct stocks portion — do you have any companies or sectors in mind? Or would you like me to suggest 3-4 specific stocks that fit your goal and risk profile? 😊"
+Then in the next response, give specific ticker symbols (e.g. RELIANCE.NS, TCS.NS, INFY.NS for India / AAPL, MSFT for US) with a one-line reason for each. Never leave stocks vague — always get to specific names.
+
 ROADMAP FORMAT — always include:
 - Goal amount and timeline
 - Monthly investable amount
@@ -107,15 +119,24 @@ export default async function handler(req) {
     });
   }
 
-  const groqKey   = process.env.ARIA_chatbot;   // Vercel env var name: ARIA_chatbot
+  // ── KEY ROTATION — picks randomly to distribute load across multiple users ──
+  // Add keys in Vercel: ARIA_chatbot, ARIA_chatbot_2, ARIA_chatbot_3, ARIA_chatbot_4, ARIA_chatbot_5
   const tavilyKey = process.env.TAVILY_API_KEY;
+  const allKeys = [
+    process.env.ARIA_chatbot,
+    process.env.ARIA_chatbot_2,
+    process.env.ARIA_chatbot_3,
+    process.env.ARIA_chatbot_4,
+    process.env.ARIA_chatbot_5,
+  ].filter(Boolean);
 
-  if (!groqKey) {
+  if (allKeys.length === 0) {
     return new Response(JSON.stringify({
       reply: "ARIA is not configured yet. Please add the ARIA_chatbot environment variable in Vercel.",
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
 
+  // All keys valid — shuffled loop in Groq call section picks and retries on 429
   let message, history, today;
   try {
     const body = await req.json();
@@ -154,64 +175,86 @@ export default async function handler(req) {
     { role: "user", content: message },
   ];
 
-  // ── GROQ CALL ─────────────────────────────────────────────────────────────
-  // 20s timeout — Edge runtime hard limit is 25s, Tavily already used 2-4s
-  const groqController = new AbortController();
-  const groqTimer = setTimeout(() => groqController.abort(), 20000);
+  // ── GROQ CALL — with per-key retry on 429 ────────────────────────────────
+  // Build payload once, reused across key retries
+  const groqPayload = JSON.stringify({
+    model: "llama-3.1-8b-instant",
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...messages,
+    ],
+    max_tokens: 1000,
+    temperature: 0.7,
+  });
 
-  try {
-    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      signal: groqController.signal,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${groqKey}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          { role: "system", content: systemPrompt },
-          ...messages,
-        ],
-        max_tokens: 1000,
-        temperature: 0.7,
-      }),
-    });
-    clearTimeout(groqTimer);
+  // Try each key in a shuffled order — if one is rate-limited, try the next
+  // Fisher-Yates shuffle: unlike sort(random-0.5), this gives truly uniform distribution
+  // With 5 keys the bias of sort() is significant — first/last keys would be hit too often
+  const shuffledKeys = [...allKeys];
+  for (let i = shuffledKeys.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledKeys[i], shuffledKeys[j]] = [shuffledKeys[j], shuffledKeys[i]];
+  }
 
-    const data = await groqRes.json();
+  for (let ki = 0; ki < shuffledKeys.length; ki++) {
+    const keyToTry = shuffledKeys[ki];
+    const groqController = new AbortController();
+    const groqTimer = setTimeout(() => groqController.abort(), 20000);
 
-    if (!groqRes.ok) {
-      // Quota exceeded
-      if (groqRes.status === 429 || data?.error?.type === "tokens_exceeded") {
+    try {
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        signal: groqController.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${keyToTry}`,
+        },
+        body: groqPayload,
+      });
+      clearTimeout(groqTimer);
+
+      const data = await groqRes.json();
+
+      if (!groqRes.ok) {
+        // Rate limit — try next key if available
+        // Groq rate limits: status 429 + error.code "rate_limit_exceeded"
+        // Also catches context window exceeded: status 400 + message includes context_length
+        if (groqRes.status === 429 || data?.error?.code === "rate_limit_exceeded") {
+          if (ki < shuffledKeys.length - 1) continue; // try next key
+          // All keys exhausted
+          return new Response(JSON.stringify({
+            reply: "ARIA is resting for today 😴 She'll be back at 5:30 AM IST!",
+            quotaExceeded: true,
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
         return new Response(JSON.stringify({
-          reply: "ARIA is resting for today 😴 She'll be back at 5:30 AM IST!",
-          quotaExceeded: true,
+          reply: "Hmm, something went wrong on my end yaar 😅 Try again in a second!",
+          error: data?.error?.message || "Groq error",
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
+
+      const reply = data?.choices?.[0]?.message?.content || "";
+      return new Response(JSON.stringify({ reply }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+
+    } catch (err) {
+      clearTimeout(groqTimer);
+      if (err.name === "AbortError") {
+        return new Response(JSON.stringify({
+          reply: "Taking too long yaar 😅 ARIA is thinking hard — try again in a second!",
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      // Network error on this key — try next if available
+      if (ki < shuffledKeys.length - 1) continue;
       return new Response(JSON.stringify({
-        reply: "Hmm, something went wrong on my end yaar 😅 Try again in a second!",
-        error: data?.error?.message || "Groq error",
+        reply: "Network hiccup yaar! Give me a second and try again 😊",
+        error: err.message,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-
-    const reply = data?.choices?.[0]?.message?.content || "";
-
-    return new Response(JSON.stringify({ reply }), {
-      status: 200, headers: { 'Content-Type': 'application/json' },
-    });
-
-  } catch (err) {
-    clearTimeout(groqTimer);
-    // AbortError = our 20s timeout fired
-    if (err.name === "AbortError") {
-      return new Response(JSON.stringify({
-        reply: "Taking too long yaar 😅 ARIA is thinking hard — try again in a second!",
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-    return new Response(JSON.stringify({
-      reply: "Network hiccup yaar! Give me a second and try again 😊",
-      error: err.message,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }
-}
+
+  // Fallback (should never reach here since loop returns)
+  return new Response(JSON.stringify({
+    reply: "ARIA is resting for today 😴 She'll be back at 5:30 AM IST!",
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });

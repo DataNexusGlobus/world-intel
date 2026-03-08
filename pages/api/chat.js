@@ -258,3 +258,4 @@ export default async function handler(req) {
   return new Response(JSON.stringify({
     reply: "ARIA is resting for today 😴 She'll be back at 5:30 AM IST!",
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+}

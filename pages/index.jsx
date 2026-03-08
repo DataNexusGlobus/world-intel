@@ -27,6 +27,9 @@ async function dbG(k){
 async function dbS(k,v){
   try{if(typeof window!=="undefined"&&window.localStorage)window.localStorage.setItem(k,JSON.stringify(v));}catch{}
 }
+async function dbD(k){
+  try{if(typeof window!=="undefined"&&window.localStorage)window.localStorage.removeItem(k);}catch{}
+}
 
 /* ── AUTH — Supabase ── */
 async function registerUser(email,pw,name){
@@ -71,6 +74,8 @@ async function logoutUser(){
   if(!supabase)return;
   await supabase.auth.signOut();
 }
+// sha256 kept for any legacy checks but no longer used for auth
+async function sha256(s){const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s+"__wi9__"));return Array.from(new Uint8Array(b)).map(x=>x.toString(16).padStart(2,"0")).join("");}
 
 /* ── EXCHANGE CONFIG ── */
 function getEx(c="usa"){
@@ -94,8 +99,8 @@ function getEx(c="usa"){
 /* ── CACHE ── */
 const _MC=new Map();
 function _ck(p){return p.slice(0,120);}
-function _cg(k){const e=_MC.get(k);if(!e)return null;if(Date.now()-e.t>3600000){_MC.delete(k);return null;}return e.v;} // 1hr cache
-function _cs(k,v){_MC.set(k,{v,t:Date.now()});if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
+function _cg(k){const e=_MC.get(k);if(!e)return null;if(Date.now()-e.t>1800000){_MC.delete(k);return null;}return e.v;} // 30min cache
+function _cs(k,v){_MC.set(k,v);if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
 /* ── CURRENT WORLD FACTS — keeps Groq (Jan 2024 cutoff) generating accurate content ── */
 /* WF block removed — Tavily now fetches all current facts dynamically.
    No hardcoding needed. Groq receives real web search results as context. */
@@ -143,6 +148,14 @@ async function _throttle(){
 
 // Known currency prefixes — used as whitelist for safe currency replacement
 const KNOWN_CURRENCIES=["₹","£","¥","€","HK$","A$","C$","R$","₩","AED ","SAR ","PKR "];
+// Safe currency swap — only replaces known prefixes, never touches N/A, —, null, or PRICE strings
+function _safeFixPrice(v,yahooPrefix){
+  if(!v||typeof v!=="string")return v;
+  const found=KNOWN_CURRENCIES.find(c=>v.startsWith(c));
+  if(!found)return v; // no known currency prefix — leave unchanged
+  if(found===yahooPrefix)return v; // already correct currency
+  return yahooPrefix+v.slice(found.length); // swap prefix only
+}
 
 // Derive currency symbol from stock exchange suffix — reliable, never depends on Groq output
 function _curForSymbol(sym){
@@ -965,6 +978,9 @@ All geopolitical analysis and threat assessments are AI interpretations of publi
 8. CHANGES
 We reserve the right to update these Terms. Continued use constitutes acceptance.
 
+9. ARIA — AI FINANCIAL ADVISOR
+ARIA's financial suggestions are AI-generated for informational purposes only and do not constitute regulated financial advice. Always verify before investing.
+
 Contact: datanexusglobus@gmail.com | Owner: Shubham Chatterjee`;
 
 /* ═══════════════════════════════════════════════════════════
@@ -1013,6 +1029,9 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
 @keyframes ticker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
 @keyframes shimmer{0%{left:-100%}100%{left:100%}}
 @keyframes countUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ariaGlow{0%,100%{box-shadow:0 0 7px rgba(0,204,245,0.35),0 0 14px rgba(0,204,245,0.15)}50%{box-shadow:0 0 12px rgba(0,204,245,0.6),0 0 24px rgba(0,204,245,0.25)}}
+@keyframes ariaTooltip{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+@keyframes ariaDotBounce{0%,80%,100%{transform:scale(0.6);opacity:0.3}40%{transform:scale(1);opacity:1}}
 .hov{transition:all .18s ease;cursor:pointer;}
 .hov:hover{opacity:.8;transform:translateY(-1px);}
 .card-hover{transition:all .2s ease;cursor:pointer;}
@@ -1050,6 +1069,8 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
   .mob-hide{display:none!important;}
   /* Show mobile-only live dot */
   .mob-live{display:flex!important;}
+  /* Show ARIA mobile banner on mobile */
+  .aria-mobile-banner{display:flex!important;}
   /* Sidebar: fixed overlay drawer */
   .sidebar{
     position:fixed!important;
@@ -1072,7 +1093,7 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
   }
   #header-logo{
     position:absolute!important;
-    left:38%!important;
+    left:44%!important;
     transform:translateX(-50%)!important;
     pointer-events:none;
   }
@@ -1085,6 +1106,8 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
   .mob-overlay{display:none!important;}
   #mob-menu-btn{display:none!important;}
   .mob-live{display:none!important;}
+  /* Hide ARIA mobile banner on desktop */
+  .aria-mobile-banner{display:none!important;}
   .sidebar{
     transform:none!important;
     position:relative!important;
@@ -1127,7 +1150,7 @@ function Loader({c,n=3,sz=5}){return <span style={{display:"inline-flex",gap:4,a
 function SkRow({h=56,mb=6}){return <div className="sk" style={{height:h,marginBottom:mb}}/>;}
 function SignalBadge({sig}){const s=(sig||"HOLD").toUpperCase();const cl=s==="STRONG BUY"?"signal-sbuy":s==="BUY"?"signal-buy":s==="HOLD"?"signal-hold":s==="SELL"?"signal-sell":"signal-ssell";return <span className={`tag ${cl}`}>{s}</span>;}
 function ChangeChip({v,prefix="",T}){if(!v||v==="N/A")return <span style={{color:T.textDD,fontSize:12}}>—</span>;const n=parseFloat(v);if(isNaN(n))return <span style={{color:T.textDD,fontSize:12}}>—</span>;const up=n>0;const zero=n===0||Object.is(n,-0);return <span style={{color:zero?T.textD:up?T.green:T.red,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700}}>{zero?"→":up?"▲":"▼"} {prefix}{v.replace(/[+-]/g,"")}</span>;}
-function ScoreBar({val=0,color,T}){return <div style={{height:4,borderRadius:2,overflow:"hidden",marginTop:4,backgroundColor:"rgba(128,128,128,0.12)"}}><div style={{width:`${Math.min(100,Math.max(0,val))}%`,height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div>;}
+function ScoreBar({val=0,color,T}){return <div style={{height:4,background:T?`rgba(${val>50?"0,0,0":"0,0,0"}`:"rgba(255,255,255,0.06)",borderRadius:2,overflow:"hidden",marginTop:4,backgroundColor:"rgba(128,128,128,0.12)"}}><div style={{width:`${Math.min(100,Math.max(0,val))}%`,height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div>;}
 function InfoCard({label,value,color,sub,T}){return <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:6}}>{label}</div><div style={{fontSize:18,fontWeight:700,color}}>{value||"—"}</div>{sub&&<div style={{marginTop:4}}>{sub}</div>}</div>;}
 
 /* ── SEV META ── */
@@ -1355,12 +1378,12 @@ function AuthScreen({onLogin,T,isDark}){
             )}
             <div>
               <label style={{display:"block",fontSize:11,color:T.textD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:7}}>EMAIL ADDRESS</label>
-              <input className="input-field" style={{border:`1px solid ${mode==="reg"&&email?(emailOk?"rgba(0,220,130,.4)":"rgba(255,58,90,.4)"):T.border}`}} type="email" defaultValue={email} onChange={e=>{setEmail(e.target.value.trim());setErr("");}} onInput={e=>{setEmail(e.target.value.trim());setErr("");}} onKeyUp={e=>setEmail(e.target.value.trim())} onKeyDown={e=>{if(e.key==="Enter"&&mode==="login"&&!busy)submit();}} placeholder="you@example.com" autoComplete="email"/>
+              <input className="input-field" style={{border:`1px solid ${mode==="reg"&&email?(emailOk?"rgba(0,220,130,.4)":"rgba(255,58,90,.4)"):T.border}`}} type="email" defaultValue={email} onChange={e=>{setEmail(e.target.value.trim());setErr("");}} onInput={e=>{setEmail(e.target.value.trim());setErr("");}} onKeyUp={e=>setEmail(e.target.value.trim())} placeholder="you@example.com" autoComplete="email"/>
             </div>
             <div>
               <label style={{display:"block",fontSize:11,color:T.textD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:7}}>PASSWORD</label>
               <div style={{position:"relative"}}>
-                <input className="input-field" style={{border:`1px solid ${T.border}`,paddingRight:46}} type={show?"text":"password"} defaultValue={pw} onChange={e=>{setPw(e.target.value);setErr("");}} onInput={e=>{setPw(e.target.value);setErr("");}} onKeyUp={e=>setPw(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!busy)submit();}} placeholder="min 8 characters" autoComplete={mode==="reg"?"new-password":"current-password"}/>
+                <input className="input-field" style={{border:`1px solid ${T.border}`,paddingRight:46}} type={show?"text":"password"} defaultValue={pw} onChange={e=>{setPw(e.target.value);setErr("");}} onInput={e=>{setPw(e.target.value);setErr("");}} onKeyUp={e=>setPw(e.target.value)} placeholder="min 8 characters" autoComplete={mode==="reg"?"new-password":"current-password"}/>
                 <button onClick={()=>setShow(p=>!p)} style={{position:"absolute",right:13,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:T.textD,cursor:"pointer",fontSize:16,padding:0}}>{show?"🙈":"👁"}</button>
               </div>
               {mode==="reg"&&pw&&<div style={{marginTop:8}}><div style={{display:"flex",gap:3,marginBottom:4}}>{[1,2,3,4,5].map(i=><div key={i} style={{flex:1,height:3,borderRadius:2,background:i<=pws?pwC[pws]:"rgba(128,128,128,.15)",transition:"background .3s"}}/>)}</div><span style={{fontSize:11,color:pwC[pws]||T.textDD}}>{pwL[pws]}</span></div>}
@@ -1369,7 +1392,7 @@ function AuthScreen({onLogin,T,isDark}){
               <>
                 <div>
                   <label style={{display:"block",fontSize:11,color:T.textD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:7}}>CONFIRM PASSWORD</label>
-                  <input className="input-field" style={{border:`1px solid ${pw2?(pw2===pw?"rgba(0,220,130,.4)":"rgba(255,58,90,.4)"):T.border}`}} type={show?"text":"password"} defaultValue={pw2} onChange={e=>{setPw2(e.target.value);setErr("");}} onInput={e=>{setPw2(e.target.value);setErr("");}} onKeyUp={e=>setPw2(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!busy)submit();}} placeholder="repeat password" autoComplete="new-password"/>
+                  <input className="input-field" style={{border:`1px solid ${pw2?(pw2===pw?"rgba(0,220,130,.4)":"rgba(255,58,90,.4)"):T.border}`}} type={show?"text":"password"} defaultValue={pw2} onChange={e=>{setPw2(e.target.value);setErr("");}} onInput={e=>{setPw2(e.target.value);setErr("");}} onKeyUp={e=>setPw2(e.target.value)} placeholder="repeat password" autoComplete="new-password"/>
                 </div>
                 <div style={{padding:"12px 14px",borderRadius:9,background:`${isDark?"rgba(0,204,245,0.04)":"rgba(0,100,200,0.04)"}`,border:`1px solid ${terms?"rgba(0,220,130,.3)":T.border}`}}>
                   <label style={{display:"flex",gap:10,alignItems:"flex-start",cursor:"pointer"}} onClick={()=>setTerms(t=>!t)}>
@@ -1452,7 +1475,7 @@ function PageNews({country,setCountry,T}){
   useEffect(()=>{mounted.current=true;load();return()=>{mounted.current=false;};},[load]);
 
   const filt=news.filter(n=>sevF==="all"||n.severity===sevF);
-  const tickerTxt=ticker.map(x=>`◆ ${x.title}${x.country?` [${x.country}]`:""}`).join("     ");
+  const tickerTxt=ticker.map(x=>`◆ ${x.title} [${x.country||""}]`).join("     ");
 
   return(
     <div className="page-enter">
@@ -1492,7 +1515,6 @@ function PageMarkets({country,setCountry,T}){
   const{ex,idx}=getEx(target);
   const QC=["USA","India","China","UK","Japan","Germany","South Korea","Brazil","UAE","Australia","Canada","France"];
   const scoreC=v=>v>=75?T.green:v>=55?T.yellow:v>=35?T.orange:T.red;
-  const loadMarkets=useCallback(()=>fetchMarkets(target),[target]);
 
   return(
     <div className="page-enter">
@@ -1506,7 +1528,7 @@ function PageMarkets({country,setCountry,T}){
         </div>
       </div>
       <div style={{padding:"18px 26px"}}>
-        <AsyncBlock key={target} loadFn={loadMarkets} color={T.green} skCount={5} successCheck={d=>Array.isArray(d)&&d.length>0} T={T}>
+        <AsyncBlock key={target} loadFn={useCallback(()=>fetchMarkets(target),[target])} color={T.green} skCount={5} successCheck={d=>Array.isArray(d)&&d.length>0} T={T}>
           {stocks=>(
             <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {/* Signal summary row */}
@@ -1595,7 +1617,6 @@ function PageStockPicks({country,setCountry,T}){
   const QC=["USA","India","China","UK","Japan","Germany","South Korea","Brazil","UAE","Australia","Canada","France"];
   const sentC=s=>s==="bullish"?T.green:s==="bearish"?T.red:T.yellow;
   const scoreC=v=>v>=75?T.green:v>=55?T.yellow:v>=35?T.orange:T.red;
-  const loadPicks=useCallback(()=>fetchStockPicks(target),[target]);
 
   return(
     <div className="page-enter">
@@ -1609,7 +1630,7 @@ function PageStockPicks({country,setCountry,T}){
         </div>
       </div>
       <div style={{padding:"18px 26px"}}>
-        <AsyncBlock key={target} loadFn={loadPicks} color={T.pink} skCount={5} successCheck={d=>Array.isArray(d?.picks)&&d.picks.filter(p=>p&&p.symbol).length>0} T={T}>
+        <AsyncBlock key={target} loadFn={useCallback(()=>fetchStockPicks(target),[target])} color={T.pink} skCount={5} successCheck={d=>d?.picks?.filter(p=>p&&p.symbol).length>0} T={T}>
           {data=>(
             <div style={{display:"flex",flexDirection:"column",gap:14}}>
               {/* Market overview */}
@@ -1787,7 +1808,6 @@ function PageIntel({country,setCountry,T}){
   const THREAT_C={critical:"#ff3a5a",high:"#ff8c00",elevated:"#f5c400",moderate:"#4ade80",low:"#00dc82"};
   const TYPE_IC={military:"✈️",cyber:"💻",economic:"📉",political:"🏛️",disaster:"🌊"};
   const QC=["Global","India","USA","China","Russia","Middle East","Europe","South Asia"];
-  const loadIntel=useCallback(()=>fetchIntel(target),[target]);
 
   return(
     <div className="page-enter">
@@ -1801,7 +1821,7 @@ function PageIntel({country,setCountry,T}){
         </div>
       </div>
       <div style={{padding:"18px 26px"}}>
-        <AsyncBlock key={target} loadFn={loadIntel} color={T.orange} successCheck={d=>d?.alerts} T={T}>
+        <AsyncBlock key={target} loadFn={useCallback(()=>fetchIntel(target),[target])} color={T.orange} successCheck={d=>d?.alerts} T={T}>
           {data=>{
             // Use live intel data if available, else fall back to dot's default tl
             const liveTl=data&&data.threatLevel?(data.threatLevel).toLowerCase():"moderate";
@@ -1855,7 +1875,6 @@ function PageForecast({country,setCountry,T}){
   const target=country||"USA";
   const scoreC=v=>v>=75?T.green:v>=50?T.yellow:v>=30?T.orange:T.red;
   const QC=["USA","India","China","UK","EU","Japan","Brazil","UAE","Germany","Australia"];
-  const loadForecast=useCallback(()=>fetchForecast(target),[target]);
 
   return(
     <div className="page-enter">
@@ -1869,7 +1888,7 @@ function PageForecast({country,setCountry,T}){
         </div>
       </div>
       <div style={{padding:"18px 26px"}}>
-        <AsyncBlock key={target} loadFn={loadForecast} color={T.cyan} successCheck={d=>d?.country} T={T}>
+        <AsyncBlock key={target} loadFn={useCallback(()=>fetchForecast(target),[target])} color={T.cyan} successCheck={d=>d?.country} T={T}>
           {data=>{
             const outC={positive:T.green,negative:T.red,critical:T.red,neutral:T.yellow}[data.economicOutlook]||T.yellow;
             return(
@@ -2156,17 +2175,206 @@ function PageAssets({T}) {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   PAGE: ARIA — Personal AI Financial Advisor
+═══════════════════════════════════════════════════════════ */
+function PageChat({session,T}){
+  const[messages,setMessages]=useState([]);
+  const[input,setInput]=useState("");
+  const[loading,setLoad]=useState(false);
+  const bottomRef=useRef(null);
+  const inputRef=useRef(null);
+  const mounted=useRef(true);
+
+  // ARIA greeting on mount
+  useEffect(()=>{
+    mounted.current=true;
+    const greeting={
+      role:"assistant",
+      content:`Hey${session?.username?(" "+session.username):""}! I'm ARIA 👋 Tell me — what's the one financial goal on your mind right now? Could be anything — a MacBook, a bike, a trip, or just building savings.`,
+      id:Date.now(),
+    };
+    setMessages([greeting]);
+    return()=>{mounted.current=false;};
+  },[]);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(()=>{
+    bottomRef.current?.scrollIntoView({behavior:"smooth"});
+  },[messages,loading]);
+
+  async function sendMessage(){
+    const text=input.trim();
+    if(!text||loading)return;
+
+    const userMsg={role:"user",content:text,id:Date.now()};
+    const newMessages=[...messages,userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setLoad(true);
+
+    try{
+      const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});
+      // Send history without the greeting's extra fields — just role+content
+      const history=newMessages.slice(0,-1).map(m=>({role:m.role,content:m.content}));
+
+      const res=await fetch("/api/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:text,history,today}),
+      });
+      const data=await res.json();
+      if(!mounted.current)return;
+
+      const reply=data.reply||"Hmm, something went wrong yaar. Try again! 😊";
+      setMessages(prev=>[...prev,{role:"assistant",content:reply,id:Date.now()}]);
+    }catch{
+      if(!mounted.current)return;
+      setMessages(prev=>[...prev,{role:"assistant",content:"Network error yaar 😅 Check your connection and try again!",id:Date.now()}]);
+    }
+    if(mounted.current)setLoad(false);
+  }
+
+  function clearChat(){
+    const greeting={
+      role:"assistant",
+      content:`Hey${session?.username?(" "+session.username):""}! I'm ARIA 👋 Tell me — what's the one financial goal on your mind right now? Could be anything — a MacBook, a bike, a trip, or just building savings.`,
+      id:Date.now(),
+    };
+    setMessages([greeting]);
+    setInput("");
+    inputRef.current?.focus();
+  }
+
+  // Render message text with basic line break support
+  function renderText(text){
+    return text.split("\n").map((line,i)=>(
+      <span key={i}>{line}{i<text.split("\n").length-1&&<br/>}</span>
+    ));
+  }
+
+  return(
+    <div className="page-enter" style={{display:"flex",flexDirection:"column",height:"100%",maxHeight:"100%"}}>
+
+      {/* Header */}
+      <div style={{padding:"16px 22px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:T.headerBg}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:36,height:36,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>💬</div>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:T.cyan,fontFamily:"'Orbitron',monospace",letterSpacing:".05em"}}>ARIA</div>
+            <div style={{fontSize:11,color:T.textDD,fontFamily:"'JetBrains Mono',monospace"}}>Personal AI Financial Advisor</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:4}}>
+            <Pulse c={T.green} s={6}/>
+            <span style={{fontSize:10,color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>LIVE</span>
+          </div>
+        </div>
+        <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"6px 10px",fontSize:12}}>🗑 Clear</button>
+      </div>
+
+      {/* Info card */}
+      <div style={{padding:"14px 22px",borderBottom:`1px solid ${T.border}`,flexShrink:0,background:isDark?"rgba(0,204,245,0.03)":"rgba(0,100,200,0.03)"}}>
+        <div style={{padding:"14px 18px",background:T.card,border:`1px solid ${T.cyan}22`,borderRadius:11,maxWidth:640}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.cyan,marginBottom:6}}>🤖 Meet ARIA</div>
+          <div style={{fontSize:13,color:T.textD,lineHeight:1.7,marginBottom:8}}>
+            Your personal AI financial advisor powered by live market data. Tell ARIA your financial goal and she'll build your exact investment roadmap — stock names, amounts, platforms, timelines. Everything.
+          </div>
+          <div style={{fontSize:12,color:T.yellow,display:"flex",alignItems:"center",gap:6}}>
+            <span>✨</span>
+            <span>Most effective for <strong>short term goals</strong> — short term wins build lifelong wealth habits.</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Messages area */}
+      <div style={{flex:1,overflowY:"auto",padding:"18px 22px",display:"flex",flexDirection:"column",gap:12}}>
+        {messages.map((msg)=>{
+          const isARIA=msg.role==="assistant";
+          return(
+            <div key={msg.id} style={{display:"flex",justifyContent:isARIA?"flex-start":"flex-end",animation:"fadeIn .2s ease"}}>
+              {isARIA&&(
+                <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,marginRight:8,marginTop:2}}>💬</div>
+              )}
+              <div style={{
+                maxWidth:"75%",
+                padding:"12px 16px",
+                borderRadius:isARIA?"4px 14px 14px 14px":"14px 4px 14px 14px",
+                background:isARIA
+                  ?(isDark?"rgba(0,204,245,0.07)":"rgba(0,100,200,0.07)")
+                  :(isDark?"rgba(168,85,247,0.12)":"rgba(100,50,200,0.1)"),
+                border:`1px solid ${isARIA?T.cyan+"22":T.purple+"33"}`,
+                fontSize:14,
+                color:T.text,
+                lineHeight:1.75,
+                fontFamily:"'Inter',sans-serif",
+              }}>
+                {renderText(msg.content)}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Typing indicator */}
+        {loading&&(
+          <div style={{display:"flex",justifyContent:"flex-start",animation:"fadeIn .2s"}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,marginRight:8}}>💬</div>
+            <div style={{padding:"14px 18px",borderRadius:"4px 14px 14px 14px",background:isDark?"rgba(0,204,245,0.07)":"rgba(0,100,200,0.07)",border:`1px solid ${T.cyan}22`,display:"flex",gap:5,alignItems:"center"}}>
+              {[0,1,2].map(i=>(
+                <span key={i} style={{width:7,height:7,borderRadius:"50%",background:T.cyan,display:"inline-block",animation:`ariaDotBounce 1.3s ${i*0.2}s infinite`}}/>
+              ))}
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef}/>
+      </div>
+
+      {/* Input area */}
+      <div style={{padding:"14px 22px",borderTop:`1px solid ${T.border}`,flexShrink:0,background:T.headerBg}}>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input
+            ref={inputRef}
+            className="input-field"
+            value={input}
+            onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
+            placeholder="Ask ARIA anything…"
+            disabled={loading}
+            style={{flex:1,border:`1px solid ${T.border}`,fontSize:14,padding:"11px 14px",borderRadius:10}}
+            maxLength={500}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={sendMessage}
+            disabled={loading||!input.trim()}
+            style={{padding:"11px 16px",fontSize:16,flexShrink:0,borderRadius:10}}
+            title="Send">
+            {loading?<Loader c={T.cyan} n={3}/>:"➤"}
+          </button>
+        </div>
+
+        {/* Bottom note */}
+        <div style={{marginTop:10,fontSize:11,color:T.textDD,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",letterSpacing:".03em"}}>
+          📝 ARIA doesn't remember across sessions. Refreshing starts fresh.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
    DASHBOARD
 ═══════════════════════════════════════════════════════════ */
 function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
   const[page,setPage]=useState("news");
   const[country,setCountry]=useState("");
+  const[searchVal,setSearch]=useState("");
   const[clock,setClock]=useState(Date.now());
   const[showTerms,setShowTerms]=useState(false);
   const[showContact,setShowContact]=useState(false);
   const[sidebarOpen,setSidebarOpen]=useState(false);
   const[warming,setWarming]=useState(false);
   const[warmDone,setWarmDone]=useState(false);
+  const[ariaTooltip,setAriaTooltip]=useState(true);   // shows every visit, user-dismissed only
+  const[ariaMobileBanner,setAriaMobileBanner]=useState(true); // mobile banner every visit
   const CSS=makeCSS(T,isDarkMode);
   isDark=isDarkMode;
 
@@ -2195,7 +2403,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
 
   // Touch swipe for mobile sidebar
   const touchStartX=useRef(null);
-  function onTouchStart(e){if(!e.touches||!e.touches[0])return;touchStartX.current=e.touches[0].clientX;}
+  function onTouchStart(e){touchStartX.current=e.touches[0].clientX;}
   function onTouchEnd(e){
     if(touchStartX.current===null)return;
     const dx=e.changedTouches[0].clientX-touchStartX.current;
@@ -2214,6 +2422,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
   const timeStr=new Intl.DateTimeFormat("en",{timeZone:tz,hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}).format(new Date(clock));
   const dateStr=new Intl.DateTimeFormat("en",{timeZone:tz,weekday:"short",month:"short",day:"numeric"}).format(new Date(clock));
 
+  function applySearch(){const q=searchVal.trim();if(q)setCountry(q);}
 
   const NAV=[
     {id:"news",  icon:"📡",label:"Intel Feed"},
@@ -2223,9 +2432,10 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
     {id:"map",   icon:"🌍",label:"Global Map"},
     {id:"intel", icon:"⚡",label:"Live Intel"},
     {id:"forecast",icon:"🔮",label:"Forecasts"},
+    {id:"aria",  icon:"💬",label:"ARIA"},
   ];
 
-  function goMap(c){setCountry(c);setPage("news");}
+  function goMap(c){setCountry(c);setSearch(c);setPage("news");}
 
   return(
     <>
@@ -2252,7 +2462,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
           </button>
 
           {/* Logo */}
-          <div id="header-logo" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0,position:"absolute",left:"38%",transform:"translateX(-50%)"}}>
+          <div id="header-logo" style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,minWidth:0,position:"absolute",left:"44%",transform:"translateX(-50%)"}}>
             <LogoSVG size={32}/>
             <div style={{minWidth:0}}>
               <div style={{fontFamily:"'Orbitron',monospace",fontSize:11,fontWeight:900,color:T.cyan,
@@ -2262,7 +2472,24 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
             </div>
           </div>
 
-          {/* Spacer — pushes right controls to far right */}
+          <div className="mob-hide" style={{width:1,height:28,background:T.border,flexShrink:0,marginLeft:4}}/>
+
+          {/* Search — desktop only */}
+          <div className="mob-hide" style={{flex:1,display:"flex",gap:6,maxWidth:400,minWidth:0}}>
+            <input className="input-field"
+              style={{border:`1px solid ${T.border}`,fontSize:12,padding:"6px 11px",minWidth:0,flex:1}}
+              value={searchVal}
+              onChange={e=>setSearch(e.target.value)}
+              onInput={e=>setSearch(e.target.value)}
+              onKeyUp={e=>{setSearch(e.target.value);if(e.key==="Enter")applySearch();}}
+              placeholder="Search country, region… (Enter)"/>
+            <button className="btn btn-primary" onClick={applySearch}
+              style={{padding:"6px 11px",fontSize:13,flexShrink:0}}>🔍</button>
+            {searchVal&&<button className="btn btn-ghost" onClick={()=>{setSearch("");setCountry("");}}
+              style={{padding:"6px 9px",flexShrink:0,fontSize:12}}>✕</button>}
+          </div>
+
+          {/* Spacer */}
           <div style={{flex:1}}/>
 
           {/* Right controls */}
@@ -2296,26 +2523,82 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
         </header>
 
         {/* BODY */}
-        <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+        <div style={{flex:1,display:"flex",overflow:"hidden",flexDirection:"column"}}>
+
+          {/* Mobile ARIA banner — shows every visit below header, dismissible */}
+          {ariaMobileBanner&&page!=="aria"&&(
+            <div style={{
+              display:"flex", // always flex, hidden on desktop via media
+              alignItems:"center",justifyContent:"space-between",
+              padding:"8px 16px",
+              background:isDark?"rgba(0,204,245,0.08)":"rgba(0,100,200,0.08)",
+              borderBottom:`1px solid ${T.cyan}33`,
+              flexShrink:0,
+            }} className="aria-mobile-banner">
+              <div style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}} onClick={()=>{setPage("aria");setSidebarOpen(false);setAriaMobileBanner(false);}}>
+                <span style={{fontSize:15}}>💬</span>
+                <span style={{fontSize:12,color:T.cyan,fontWeight:600}}>Meet ARIA — your personal AI financial advisor</span>
+              </div>
+              <button onClick={()=>setAriaMobileBanner(false)} style={{background:"none",border:"none",color:T.textDD,cursor:"pointer",fontSize:16,padding:"0 4px",flexShrink:0}}>✕</button>
+            </div>
+          )}
+
+          <div style={{flex:1,display:"flex",overflow:"hidden"}}>
           {/* Mobile overlay backdrop */}
           {sidebarOpen&&<div onClick={()=>setSidebarOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:149,backdropFilter:"blur(2px)"}} className="mob-overlay"/>}
 
           {/* SIDEBAR */}
           <nav style={{width:190,background:T.sidebarBg,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"18px 11px",flexShrink:0,overflowY:"auto"}} className={`sidebar${sidebarOpen?" open":""}`}>
             <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".12em",marginBottom:12,paddingLeft:4}}>NAVIGATION</div>
-            {NAV.map(n=>(
-              <div key={n.id} className={`nav-link ${page===n.id?"active":""}`} onClick={()=>{setPage(n.id);setSidebarOpen(false);}} style={{marginBottom:5}}>
-                <span style={{fontSize:16}}>{n.icon}</span>
-                <span style={{fontSize:13,fontWeight:page===n.id?600:400}}>{n.label}</span>
-              </div>
-            ))}
+            {NAV.map(n=>{
+              const isAria=n.id==="aria";
+              return(
+                <div key={n.id} style={{position:"relative",marginBottom:5}}>
+                  <div
+                    className={`nav-link ${page===n.id?"active":""}`}
+                    onClick={()=>{setPage(n.id);setSidebarOpen(false);if(isAria)setAriaTooltip(false);}}
+                    style={{
+                      marginBottom:0,
+                      ...(isAria&&page!==n.id?{
+                        animation:"ariaGlow 2.5s ease infinite",
+                        border:`1px solid ${T.cyan}55`,
+                        background:isDark?"rgba(0,204,245,0.06)":"rgba(0,100,200,0.06)",
+                      }:{}),
+                    }}>
+                    <span style={{fontSize:16}}>{n.icon}</span>
+                    <span style={{fontSize:13,fontWeight:page===n.id?600:400}}>{n.label}</span>
+                    {isAria&&page!==n.id&&<span style={{marginLeft:"auto",width:7,height:7,borderRadius:"50%",background:T.cyan,boxShadow:`0 0 6px ${T.cyan}`,flexShrink:0}}/>}
+                  </div>
+                  {/* ARIA tooltip — shows every visit, user dismissed only */}
+                  {isAria&&ariaTooltip&&page!==n.id&&(
+                    <div style={{
+                      position:"absolute",left:"105%",top:"50%",transform:"translateY(-50%)",
+                      background:isDark?"rgba(6,10,18,0.97)":"rgba(255,255,255,0.97)",
+                      border:`1px solid ${T.cyan}55`,borderRadius:10,padding:"10px 13px",
+                      width:190,zIndex:200,animation:"ariaTooltip .3s ease",
+                      boxShadow:`0 4px 20px ${T.shadow},0 0 12px ${T.cyan}22`,
+                    }}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:6}}>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:700,color:T.cyan,marginBottom:4}}>💬 Meet ARIA</div>
+                          <div style={{fontSize:11,color:T.textD,lineHeight:1.6}}>Your personal AI financial advisor. Tell her your goal — she'll build your exact investment roadmap.</div>
+                        </div>
+                        <button onClick={e=>{e.stopPropagation();setAriaTooltip(false);}} style={{background:"none",border:"none",color:T.textDD,cursor:"pointer",fontSize:14,padding:0,flexShrink:0,lineHeight:1}}>✕</button>
+                      </div>
+                      {/* Tooltip arrow */}
+                      <div style={{position:"absolute",left:-6,top:"50%",width:10,height:10,background:isDark?"rgba(6,10,18,0.97)":"rgba(255,255,255,0.97)",border:`1px solid ${T.cyan}55`,borderRight:"none",borderTop:"none",transform:"translateY(-50%) rotate(45deg)"}}/>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             <div style={{marginTop:"auto",paddingTop:18,borderTop:`1px solid ${T.border}`}}>
               {country&&(
                 <div style={{padding:"9px 11px",background:`${isDarkMode?"rgba(0,204,245,.06)":"rgba(0,100,200,.06)"}`,border:`1px solid ${T.cyan}22`,borderRadius:8,marginBottom:9}}>
                   <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:3}}>FOCUS</div>
                   <div style={{fontSize:13,color:T.cyan,fontWeight:600}}>{country}</div>
-                  <button onClick={()=>{setCountry("");}} style={{fontSize:10,color:T.red,background:"none",border:"none",cursor:"pointer",marginTop:3,padding:0}}>✕ clear</button>
+                  <button onClick={()=>{setCountry("");setSearch("");}} style={{fontSize:10,color:T.red,background:"none",border:"none",cursor:"pointer",marginTop:3,padding:0}}>✕ clear</button>
                 </div>
               )}
               <div style={{fontSize:11,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}}>{dateStr}<br/><span style={{fontSize:10}}>{tz.replace(/_/g," ")}</span></div>
@@ -2323,15 +2606,26 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
           </nav>
 
           {/* PAGE */}
-          <main style={{flex:1,overflowY:"auto",background:T.bg}} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-            {page==="news"    &&<PageNews     key={`news-${country}`}     country={country} setCountry={setCountry} T={T}/>}
-            {page==="markets" &&<PageMarkets  key={`mkts-${country}`}     country={country} setCountry={setCountry} T={T}/>}
-            {page==="picks"   &&<PageStockPicks key={`picks-${country}`}  country={country} setCountry={setCountry} T={T}/>}
+          <main
+            style={{flex:1,background:T.bg,
+              // Bug fix: ARIA needs overflow:hidden so internal messages div scrolls, not main
+              // Other pages need overflowY:auto for normal scroll
+              overflowY:page==="aria"?"hidden":"auto",
+            }}
+            // Bug fix: disable sidebar swipe on ARIA page — interferes with chat scroll on mobile
+            onTouchStart={page==="aria"?undefined:onTouchStart}
+            onTouchEnd={page==="aria"?undefined:onTouchEnd}
+          >
+            {page==="news"    &&<PageNews     key={`news-${country}`}     country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
+            {page==="markets" &&<PageMarkets  key={`mkts-${country}`}     country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
+            {page==="picks"   &&<PageStockPicks key={`picks-${country}`}  country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
             {page==="map"     &&<PageMap       onSelect={goMap} T={T}/>}
-            {page==="intel"   &&<PageIntel    key={`intel-${country}`}    country={country} setCountry={setCountry} T={T}/>}
+            {page==="intel"   &&<PageIntel    key={`intel-${country}`}    country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
             {page==="assets"  &&<PageAssets T={T}/>}
-            {page==="forecast"&&<PageForecast key={`forecast-${country}`} country={country} setCountry={setCountry} T={T}/>}
+            {page==="forecast"&&<PageForecast key={`forecast-${country}`} country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
+            {page==="aria"    &&<PageChat session={session} T={T}/>}
           </main>
+        </div>
         </div>
 
         {/* FOOTER */}

@@ -100,7 +100,7 @@ function getEx(c="usa"){
 const _MC=new Map();
 function _ck(p){return p.slice(0,120);}
 function _cg(k){const e=_MC.get(k);if(!e)return null;if(Date.now()-e.t>1800000){_MC.delete(k);return null;}return e.v;} // 30min cache
-function _cs(k,v){_MC.set(k,v);if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
+function _cs(k,v){_MC.set(k,{v,t:Date.now()});if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
 /* ── CURRENT WORLD FACTS — keeps Groq (Jan 2024 cutoff) generating accurate content ── */
 /* WF block removed — Tavily now fetches all current facts dynamically.
    No hardcoding needed. Groq receives real web search results as context. */
@@ -1261,14 +1261,17 @@ function CookieBanner({onAccept,T}){
 
 /* ─ CONTACT MODAL ─ */
 function ContactModal({onClose,T}){
+  const[showTerms,setShowTerms]=useState(false);
   return(
+    <>
+    {showTerms&&<TermsModal onClose={()=>setShowTerms(false)} T={T}/>}
     <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="modal" style={{maxWidth:480}}>
         <div style={{padding:"18px 22px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontFamily:"'Orbitron',monospace",fontSize:11,fontWeight:700,color:T.cyan,letterSpacing:".15em"}}>CONTACT US</div>
           <button className="btn btn-danger" onClick={onClose}>✕ CLOSE</button>
         </div>
-        <div style={{padding:"28px 24px",display:"flex",flexDirection:"column",gap:20}}>
+        <div style={{padding:"28px 24px",display:"flex",flexDirection:"column",gap:20,overflowY:"auto",maxHeight:"70vh"}}>
           <div style={{textAlign:"center"}}>
             <LogoSVG size={52}/>
             <div style={{fontFamily:"'Orbitron',monospace",fontSize:16,fontWeight:900,color:T.cyan,letterSpacing:".15em",marginTop:10}}>WORLD INTEL</div>
@@ -1289,13 +1292,25 @@ function ContactModal({onClose,T}){
               </div>
             </div>
           </div>
-          <div style={{fontSize:12,color:T.textDD,textAlign:"center",lineHeight:1.6}}>
-            We typically respond within 24–48 hours. For general questions, please review our{" "}
-            <span style={{color:T.cyan,cursor:"pointer",textDecoration:"underline"}} onClick={onClose}>Terms & Conditions</span>.
+          {/* Terms & Conditions section at bottom */}
+          <div style={{padding:"16px 20px",background:T.bg2,border:`1px solid ${T.border}`,borderRadius:10}}>
+            <div style={{fontSize:12,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:8}}>LEGAL</div>
+            <div style={{fontSize:13,color:T.textD,lineHeight:1.6,marginBottom:10}}>
+              By using World Intel, you agree to our terms of service and disclaimer regarding AI-generated financial content.
+            </div>
+            <button
+              onClick={()=>setShowTerms(true)}
+              style={{width:"100%",padding:"10px 16px",background:"transparent",border:`1px solid ${T.cyan}44`,borderRadius:8,color:T.cyan,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",letterSpacing:".05em"}}>
+              📄 View Terms &amp; Conditions
+            </button>
+          </div>
+          <div style={{fontSize:11,color:T.textDD,textAlign:"center",lineHeight:1.6}}>
+            We typically respond within 24–48 hours.
           </div>
         </div>
       </div>
     </div>
+    </>
   );
 }
 
@@ -2245,35 +2260,38 @@ function PageChat({session,T}){
     inputRef.current?.focus();
   }
 
-  // Render message text with basic line break support
+  // Render message text with line break support — split once, not per-element
   function renderText(text){
-    return text.split("\n").map((line,i)=>(
-      <span key={i}>{line}{i<text.split("\n").length-1&&<br/>}</span>
+    const lines=text.split("\n");
+    return lines.map((line,i)=>(
+      <span key={i}>{line}{i<lines.length-1&&<br/>}</span>
     ));
   }
 
   return(
     <div className="page-enter" style={{display:"flex",flexDirection:"column",height:"100%",maxHeight:"100%"}}>
 
-      {/* Header */}
-      <div style={{padding:"16px 22px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:T.headerBg}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:36,height:36,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>💬</div>
+      {/* Compact ARIA header — just title bar, no info card */}
+      <div style={{padding:"10px 18px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:T.headerBg}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>💬</div>
           <div>
-            <div style={{fontSize:15,fontWeight:700,color:T.cyan,fontFamily:"'Orbitron',monospace",letterSpacing:".05em"}}>ARIA</div>
-            <div style={{fontSize:11,color:T.textDD,fontFamily:"'JetBrains Mono',monospace"}}>Personal AI Financial Advisor</div>
+            <div style={{fontSize:13,fontWeight:700,color:T.cyan,fontFamily:"'Orbitron',monospace",letterSpacing:".05em",lineHeight:1.1}}>ARIA</div>
+            <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace"}}>Personal AI Financial Advisor</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:5,marginLeft:4}}>
-            <Pulse c={T.green} s={6}/>
+          <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:4}}>
+            <Pulse c={T.green} s={5}/>
             <span style={{fontSize:10,color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>LIVE</span>
           </div>
         </div>
-        <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"6px 10px",fontSize:12}}>🗑 Clear</button>
+        <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"4px 8px",fontSize:11}}>🗑 Clear</button>
       </div>
 
-      {/* Info card */}
-      <div style={{padding:"14px 22px",borderBottom:`1px solid ${T.border}`,flexShrink:0,background:isDark?"rgba(0,204,245,0.03)":"rgba(0,100,200,0.03)"}}>
-        <div style={{padding:"14px 18px",background:T.card,border:`1px solid ${T.cyan}22`,borderRadius:11,maxWidth:640}}>
+      {/* Messages area — info card is inside here so it scrolls away during chat */}
+      <div style={{flex:1,overflowY:"auto",padding:"18px 22px",display:"flex",flexDirection:"column",gap:12}}>
+
+        {/* Info card — scrolls away as chat grows, no longer sticky */}
+        <div style={{padding:"14px 18px",background:T.card,border:`1px solid ${T.cyan}22`,borderRadius:11,marginBottom:4,flexShrink:0}}>
           <div style={{fontSize:13,fontWeight:700,color:T.cyan,marginBottom:6}}>🤖 Meet ARIA</div>
           <div style={{fontSize:13,color:T.textD,lineHeight:1.7,marginBottom:8}}>
             Your personal AI financial advisor powered by live market data. Tell ARIA your financial goal and she'll build your exact investment roadmap — stock names, amounts, platforms, timelines. Everything.
@@ -2283,10 +2301,6 @@ function PageChat({session,T}){
             <span>Most effective for <strong>short term goals</strong> — short term wins build lifelong wealth habits.</span>
           </div>
         </div>
-      </div>
-
-      {/* Messages area */}
-      <div style={{flex:1,overflowY:"auto",padding:"18px 22px",display:"flex",flexDirection:"column",gap:12}}>
         {messages.map((msg)=>{
           const isARIA=msg.role==="assistant";
           return(
@@ -2375,6 +2389,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
   const[warmDone,setWarmDone]=useState(false);
   const[ariaTooltip,setAriaTooltip]=useState(true);   // shows every visit, user-dismissed only
   const[ariaMobileBanner,setAriaMobileBanner]=useState(true); // mobile banner every visit
+  const[showSettings,setShowSettings]=useState(false); // settings dropdown panel
   const CSS=makeCSS(T,isDarkMode);
   isDark=isDarkMode;
 
@@ -2472,53 +2487,92 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
             </div>
           </div>
 
-          <div className="mob-hide" style={{width:1,height:28,background:T.border,flexShrink:0,marginLeft:4}}/>
-
-          {/* Search — desktop only */}
-          <div className="mob-hide" style={{flex:1,display:"flex",gap:6,maxWidth:400,minWidth:0}}>
-            <input className="input-field"
-              style={{border:`1px solid ${T.border}`,fontSize:12,padding:"6px 11px",minWidth:0,flex:1}}
-              value={searchVal}
-              onChange={e=>setSearch(e.target.value)}
-              onInput={e=>setSearch(e.target.value)}
-              onKeyUp={e=>{setSearch(e.target.value);if(e.key==="Enter")applySearch();}}
-              placeholder="Search country, region… (Enter)"/>
-            <button className="btn btn-primary" onClick={applySearch}
-              style={{padding:"6px 11px",fontSize:13,flexShrink:0}}>🔍</button>
-            {searchVal&&<button className="btn btn-ghost" onClick={()=>{setSearch("");setCountry("");}}
-              style={{padding:"6px 9px",flexShrink:0,fontSize:12}}>✕</button>}
-          </div>
-
-          {/* Spacer */}
+          {/* Spacer pushes logo to centre and settings to right */}
           <div style={{flex:1}}/>
 
-          {/* Right controls */}
-          <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-            <div className="mob-hide" style={{display:"flex",alignItems:"center",gap:5}}>
-              <Pulse c={T.green} s={6}/>
-              <span style={{fontSize:11,color:T.textDD,fontFamily:"'JetBrains Mono',monospace"}}>{timeStr}</span>
-            </div>
-            <span className="mob-hide" style={{fontSize:11,color:T.cyan,fontWeight:600,maxWidth:90,
-              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>@{session.username}</span>
-            <div className="mob-live" style={{display:"none",alignItems:"center",gap:4}}>
-              <Pulse c={T.green} s={6}/>
-            </div>
-            {/* Theme toggle */}
-            <button onClick={onToggleTheme}
-              style={{width:30,height:17,borderRadius:9,background:isDarkMode?"rgba(0,204,245,.18)":"rgba(255,200,0,.18)",
-                border:`1px solid ${isDarkMode?T.cyan+"44":"rgba(200,150,0,.3)"}`,
-                cursor:"pointer",position:"relative",flexShrink:0,transition:"all .2s"}}>
-              <span style={{position:"absolute",top:2,left:isDarkMode?13:2,width:11,height:11,
-                borderRadius:"50%",background:isDarkMode?T.cyan:"#f5c400",transition:"left .2s",
-                display:"flex",alignItems:"center",justifyContent:"center",fontSize:7}}>{isDarkMode?"🌙":"☀️"}</span>
+          {/* ── SETTINGS BUTTON + DROPDOWN ─────────────────────────── */}
+          <div style={{position:"relative",flexShrink:0}}>
+            <button
+              onClick={()=>setShowSettings(o=>!o)}
+              style={{
+                display:"flex",alignItems:"center",justifyContent:"center",
+                width:34,height:34,borderRadius:8,cursor:"pointer",
+                background:showSettings?(isDarkMode?"rgba(0,204,245,0.14)":"rgba(0,100,200,0.1)"):"transparent",
+                border:`1.5px solid ${showSettings?T.cyan+"88":T.border}`,
+                color:T.textD,fontSize:16,transition:"all .15s",flexShrink:0,
+              }}
+              title="Settings"
+              aria-label="Settings">
+              ⚙️
             </button>
-            <button className="btn" onClick={warmCache} disabled={warming}
-              title="Pre-load top 6 countries into cache"
-              style={{padding:"4px 8px",fontSize:10,flexShrink:0,border:`1px solid ${T.cyan}44`,color:warming?T.textDD:warmDone?"#00e676":T.cyan,background:"transparent"}}>
-              {warming?<Loader c={T.cyan} n={3}/>:warmDone?"✅":"⚡"}
-            </button>
-            <button className="btn btn-danger" onClick={onLogout}
-              style={{padding:"4px 9px",fontSize:10,flexShrink:0}}>OUT</button>
+
+            {/* Settings dropdown panel */}
+            {showSettings&&(
+              <>
+                {/* Click-away overlay */}
+                <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,zIndex:149}}/>
+                <div style={{
+                  position:"absolute",top:"calc(100% + 8px)",right:0,
+                  background:isDarkMode?"rgba(6,10,18,0.97)":"rgba(255,255,255,0.97)",
+                  border:`1px solid ${T.border}`,borderRadius:12,
+                  padding:"10px 0",width:210,zIndex:300,
+                  boxShadow:`0 8px 32px ${T.shadow},0 0 0 1px ${T.border}`,
+                  animation:"fadeIn .15s ease",
+                }}>
+                  {/* User info */}
+                  <div style={{padding:"10px 16px 10px",borderBottom:`1px solid ${T.border}`,marginBottom:6}}>
+                    <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:3}}>SIGNED IN AS</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <Pulse c={T.green} s={6}/>
+                      <span style={{fontSize:13,color:T.cyan,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>@{session.username}</span>
+                    </div>
+                    <div style={{fontSize:10,color:T.textDD,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{timeStr}</div>
+                  </div>
+
+                  {/* Theme toggle */}
+                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}
+                    onClick={()=>{onToggleTheme();}}>
+                    <div style={{display:"flex",alignItems:"center",gap:9}}>
+                      <span style={{fontSize:14}}>{isDarkMode?"🌙":"☀️"}</span>
+                      <span style={{fontSize:13,color:T.text}}>{isDarkMode?"Dark Mode":"Light Mode"}</span>
+                    </div>
+                    <div style={{width:30,height:17,borderRadius:9,background:isDarkMode?"rgba(0,204,245,.18)":"rgba(255,200,0,.18)",border:`1px solid ${isDarkMode?T.cyan+"44":"rgba(200,150,0,.3)"}`,cursor:"pointer",position:"relative",flexShrink:0}}>
+                      <span style={{position:"absolute",top:2,left:isDarkMode?13:2,width:11,height:11,borderRadius:"50%",background:isDarkMode?T.cyan:"#f5c400",transition:"left .2s",display:"block"}}/>
+                    </div>
+                  </div>
+
+                  {/* Warm cache */}
+                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:warming?"not-allowed":"pointer",opacity:warming?0.6:1}}
+                    onClick={()=>{if(!warming){warmCache();}}}>
+                    <div style={{display:"flex",alignItems:"center",gap:9}}>
+                      <span style={{fontSize:14}}>{warmDone?"✅":"⚡"}</span>
+                      <div>
+                        <div style={{fontSize:13,color:T.text}}>Warm Cache</div>
+                        <div style={{fontSize:10,color:T.textDD}}>Pre-load top 6 countries</div>
+                      </div>
+                    </div>
+                    {warming&&<Loader c={T.cyan} n={3}/>}
+                  </div>
+
+                  {/* Contact Us */}
+                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}
+                    onClick={()=>{setShowSettings(false);setShowContact(true);}}>
+                    <span style={{fontSize:14}}>📬</span>
+                    <span style={{fontSize:13,color:T.text}}>Contact Us</span>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{height:1,background:T.border,margin:"6px 0"}}/>
+
+                  {/* Logout */}
+                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}
+                    onClick={()=>{setShowSettings(false);onLogout();}}>
+                    <span style={{fontSize:14}}>🚪</span>
+                    <span style={{fontSize:13,color:T.red,fontWeight:600}}>Logout</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </header>
 
@@ -2608,11 +2662,13 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
           {/* PAGE */}
           <main
             style={{flex:1,background:T.bg,
-              // Bug fix: ARIA needs overflow:hidden so internal messages div scrolls, not main
-              // Other pages need overflowY:auto for normal scroll
+              // ARIA: flex container so child flex:1 actually fills height; overflow:hidden so messages scroll internally
+              // Other pages: block layout with scroll
+              display:page==="aria"?"flex":"block",
+              flexDirection:"column",
               overflowY:page==="aria"?"hidden":"auto",
             }}
-            // Bug fix: disable sidebar swipe on ARIA page — interferes with chat scroll on mobile
+            // Disable sidebar swipe on ARIA — interferes with chat scroll on mobile
             onTouchStart={page==="aria"?undefined:onTouchStart}
             onTouchEnd={page==="aria"?undefined:onTouchEnd}
           >
@@ -2623,22 +2679,17 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
             {page==="intel"   &&<PageIntel    key={`intel-${country}`}    country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
             {page==="assets"  &&<PageAssets T={T}/>}
             {page==="forecast"&&<PageForecast key={`forecast-${country}`} country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
-            {page==="aria"    &&<PageChat session={session} T={T}/>}
+            {/* PageChat always mounted — display:none preserves chat history when switching tabs */}
+            <div style={{display:page==="aria"?"flex":"none",flex:1,flexDirection:"column",height:"100%",minHeight:0}}>
+              <PageChat session={session} T={T}/>
+            </div>
           </main>
         </div>
         </div>
 
         {/* FOOTER */}
-        <footer style={{height:38,background:T.headerBg,borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 22px",gap:18,flexShrink:0}}>
+        <footer style={{height:38,background:T.headerBg,borderTop:`1px solid ${T.border}`,display:"flex",alignItems:"center",padding:"0 22px",flexShrink:0}}>
           <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:9,color:T.textDD,letterSpacing:".1em"}}>WORLD INTEL v9</div>
-          <div style={{flex:1}}/>
-          <div style={{display:"flex",gap:14,alignItems:"center",fontSize:11,color:T.textDD}}>
-            <span className="hov" onClick={()=>setShowContact(true)} style={{color:T.cyan,cursor:"pointer",textDecoration:"underline"}}>Contact Us</span>
-            <span>·</span>
-            <span style={{color:T.textD}}>Shubham Chatterjee</span>
-            <span>·</span>
-            <span className="hov" onClick={()=>setShowTerms(true)} style={{color:T.cyan,cursor:"pointer",textDecoration:"underline"}}>Terms & Conditions</span>
-          </div>
         </footer>
       </div>
     </>

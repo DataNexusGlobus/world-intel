@@ -1263,11 +1263,9 @@ function CookieBanner({onAccept,T}){
 }
 
 /* ─ CONTACT MODAL ─ */
-function ContactModal({onClose,T}){
-  const[showTerms,setShowTerms]=useState(false);
+function ContactModal({onClose,onShowTerms,T}){
   return(
     <>
-    {showTerms&&<TermsModal onClose={()=>setShowTerms(false)} T={T} zIndex={950}/>}
     <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="modal" style={{maxWidth:480}}>
         <div style={{padding:"18px 22px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1302,7 +1300,7 @@ function ContactModal({onClose,T}){
               By using World Intel, you agree to our terms of service and disclaimer regarding AI-generated financial content.
             </div>
             <button
-              onClick={()=>setShowTerms(true)}
+              onClick={()=>{onShowTerms&&onShowTerms();}}
               style={{width:"100%",padding:"10px 16px",background:"transparent",border:`1px solid ${T.cyan}44`,borderRadius:8,color:T.cyan,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"'JetBrains Mono',monospace",letterSpacing:".05em"}}>
               📄 View Terms &amp; Conditions
             </button>
@@ -1993,6 +1991,20 @@ const ASSET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 // Per-symbol last-known-good price cache — survives across refreshes
 // If Yahoo Finance is flaky for a symbol, we show last real price instead of "no data"
 const _symbolGoodPrice = new Map(); // symbol → {price, change1d_raw}
+// Load any previously persisted prices from localStorage on startup
+try{
+  const _sg=JSON.parse(localStorage.getItem("wi:sgp")||"{}");
+  Object.entries(_sg).forEach(([k,v])=>_symbolGoodPrice.set(k,v));
+}catch{}
+// Helper to persist a new good price to localStorage
+function _sgSave(symbol,val){
+  _symbolGoodPrice.set(symbol,val);
+  try{
+    const _sg={};
+    _symbolGoodPrice.forEach((v,k)=>{ _sg[k]=v; });
+    localStorage.setItem("wi:sgp",JSON.stringify(_sg));
+  }catch{}
+}
 
 async function fetchAssets() {
   // Check browser cache first
@@ -2025,8 +2037,8 @@ async function fetchAssets() {
         if (cached) return {...a, price: cached.price, change1d_raw: cached.change1d_raw, isReal: true, isStale: true};
         return {...a, price: null, change1d_raw: 0, isReal: false};
       }
-      // Good price received — update the per-symbol cache
-      _symbolGoodPrice.set(a.symbol, {price: p.price, change1d_raw: p.change1d_raw || 0});
+      // Good price received — update the per-symbol cache (localStorage-backed)
+      _sgSave(a.symbol, {price: p.price, change1d_raw: p.change1d_raw || 0});
       return {
         ...a,
         price: p.price,
@@ -2480,7 +2492,64 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
   return(
     <>
       {showTerms&&<TermsModal onClose={()=>setShowTerms(false)} T={T}/>}
-      {showContact&&<ContactModal onClose={()=>setShowContact(false)} T={T}/>}
+      {showContact&&<ContactModal onClose={()=>setShowContact(false)} onShowTerms={()=>{setShowContact(false);setShowTerms(true);}} T={T}/>}
+
+      {/* Settings dropdown — rendered at page root level, outside header, so backdrop-filter stacking context on header cannot trap it */}
+      {showSettings&&(
+        <>
+          <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,zIndex:498}}/>
+          <div style={{
+            position:"fixed",top:56,right:8,
+            background:isDarkMode?"rgba(6,10,18,0.97)":"rgba(255,255,255,0.97)",
+            border:`1px solid ${T.border}`,borderRadius:12,
+            padding:"10px 0",width:210,zIndex:499,
+            boxShadow:`0 8px 32px ${T.shadow},0 0 0 1px ${T.border}`,
+            animation:"fadeIn .15s ease",
+          }}>
+            {/* User info */}
+            <div style={{padding:"10px 16px 10px",borderBottom:`1px solid ${T.border}`,marginBottom:6}}>
+              <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:3}}>SIGNED IN AS</div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <Pulse c={T.green} s={6}/>
+                <span style={{fontSize:13,color:T.cyan,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>@{session.username}</span>
+              </div>
+              <div style={{fontSize:10,color:T.textDD,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{timeStr}</div>
+            </div>
+            {/* Theme toggle */}
+            <div style={{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}} onClick={onToggleTheme}>
+              <div style={{display:"flex",alignItems:"center",gap:9}}>
+                <span style={{fontSize:14}}>{isDarkMode?"🌙":"☀️"}</span>
+                <span style={{fontSize:13,color:T.text}}>{isDarkMode?"Dark Mode":"Light Mode"}</span>
+              </div>
+              <div style={{width:30,height:17,borderRadius:9,background:isDarkMode?"rgba(0,204,245,.18)":"rgba(255,200,0,.18)",border:`1px solid ${isDarkMode?T.cyan+"44":"rgba(200,150,0,.3)"}`,position:"relative",flexShrink:0}}>
+                <span style={{position:"absolute",top:2,left:isDarkMode?13:2,width:11,height:11,borderRadius:"50%",background:isDarkMode?T.cyan:"#f5c400",transition:"left .2s",display:"block"}}/>
+              </div>
+            </div>
+            {/* Warm cache */}
+            <div style={{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:warming?"not-allowed":"pointer",opacity:warming?0.6:1}} onClick={()=>{if(!warming){warmCache();}}}>
+              <div style={{display:"flex",alignItems:"center",gap:9}}>
+                <span style={{fontSize:14}}>{warmDone?"✅":"⚡"}</span>
+                <div>
+                  <div style={{fontSize:13,color:T.text}}>Warm Cache</div>
+                  <div style={{fontSize:10,color:T.textDD}}>Pre-load top 6 countries</div>
+                </div>
+              </div>
+              {warming&&<Loader c={T.cyan} n={3}/>}
+            </div>
+            {/* Contact Us */}
+            <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:9,cursor:"pointer"}} onClick={()=>{setShowSettings(false);setShowContact(true);}}>
+              <span style={{fontSize:14}}>📬</span>
+              <span style={{fontSize:13,color:T.text}}>Contact Us</span>
+            </div>
+            <div style={{height:1,background:T.border,margin:"6px 0"}}/>
+            {/* Logout */}
+            <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:9,cursor:"pointer"}} onClick={()=>{setShowSettings(false);onLogout();}}>
+              <span style={{fontSize:14}}>🚪</span>
+              <span style={{fontSize:13,color:T.red,fontWeight:600}}>Logout</span>
+            </div>
+          </div>
+        </>
+      )}
       <style>{CSS}</style>
       <div style={{height:"100vh",background:T.bg,display:"flex",flexDirection:"column",overflow:"hidden"}}>
 
@@ -2515,7 +2584,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
           {/* Spacer pushes logo to centre and settings to right */}
           <div style={{flex:1}}/>
 
-          {/* ── SETTINGS BUTTON + DROPDOWN ─────────────────────────── */}
+          {/* ── SETTINGS BUTTON ─────────────────────────── */}
           <div style={{position:"relative",flexShrink:0}}>
             <button
               onClick={()=>setShowSettings(o=>!o)}
@@ -2530,74 +2599,6 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
               aria-label="Settings">
               ⚙️
             </button>
-
-            {/* Settings dropdown panel */}
-            {showSettings&&(
-              <>
-                {/* Click-away overlay */}
-                <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,zIndex:149}}/>
-                <div style={{
-                  position:"fixed",top:56,right:8,
-                  background:isDarkMode?"rgba(6,10,18,0.97)":"rgba(255,255,255,0.97)",
-                  border:`1px solid ${T.border}`,borderRadius:12,
-                  padding:"10px 0",width:210,zIndex:300,
-                  boxShadow:`0 8px 32px ${T.shadow},0 0 0 1px ${T.border}`,
-                  animation:"fadeIn .15s ease",
-                }}>
-                  {/* User info */}
-                  <div style={{padding:"10px 16px 10px",borderBottom:`1px solid ${T.border}`,marginBottom:6}}>
-                    <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:3}}>SIGNED IN AS</div>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <Pulse c={T.green} s={6}/>
-                      <span style={{fontSize:13,color:T.cyan,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>@{session.username}</span>
-                    </div>
-                    <div style={{fontSize:10,color:T.textDD,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{timeStr}</div>
-                  </div>
-
-                  {/* Theme toggle */}
-                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}
-                    onClick={()=>{onToggleTheme();}}>
-                    <div style={{display:"flex",alignItems:"center",gap:9}}>
-                      <span style={{fontSize:14}}>{isDarkMode?"🌙":"☀️"}</span>
-                      <span style={{fontSize:13,color:T.text}}>{isDarkMode?"Dark Mode":"Light Mode"}</span>
-                    </div>
-                    <div style={{width:30,height:17,borderRadius:9,background:isDarkMode?"rgba(0,204,245,.18)":"rgba(255,200,0,.18)",border:`1px solid ${isDarkMode?T.cyan+"44":"rgba(200,150,0,.3)"}`,cursor:"pointer",position:"relative",flexShrink:0}}>
-                      <span style={{position:"absolute",top:2,left:isDarkMode?13:2,width:11,height:11,borderRadius:"50%",background:isDarkMode?T.cyan:"#f5c400",transition:"left .2s",display:"block"}}/>
-                    </div>
-                  </div>
-
-                  {/* Warm cache */}
-                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:warming?"not-allowed":"pointer",opacity:warming?0.6:1}}
-                    onClick={()=>{if(!warming){warmCache();}}}>
-                    <div style={{display:"flex",alignItems:"center",gap:9}}>
-                      <span style={{fontSize:14}}>{warmDone?"✅":"⚡"}</span>
-                      <div>
-                        <div style={{fontSize:13,color:T.text}}>Warm Cache</div>
-                        <div style={{fontSize:10,color:T.textDD}}>Pre-load top 6 countries</div>
-                      </div>
-                    </div>
-                    {warming&&<Loader c={T.cyan} n={3}/>}
-                  </div>
-
-                  {/* Contact Us */}
-                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}
-                    onClick={()=>{setShowSettings(false);setShowContact(true);}}>
-                    <span style={{fontSize:14}}>📬</span>
-                    <span style={{fontSize:13,color:T.text}}>Contact Us</span>
-                  </div>
-
-                  {/* Divider */}
-                  <div style={{height:1,background:T.border,margin:"6px 0"}}/>
-
-                  {/* Logout */}
-                  <div style={{padding:"8px 16px",display:"flex",alignItems:"center",gap:9,cursor:"pointer"}}
-                    onClick={()=>{setShowSettings(false);onLogout();}}>
-                    <span style={{fontSize:14}}>🚪</span>
-                    <span style={{fontSize:13,color:T.red,fontWeight:600}}>Logout</span>
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         </header>
 

@@ -100,7 +100,7 @@ function getEx(c="usa"){
 const _MC=new Map();
 function _ck(p){return p.slice(0,120);}
 function _cg(k){const e=_MC.get(k);if(!e)return null;if(Date.now()-e.t>1800000){_MC.delete(k);return null;}return e.v;} // 30min cache
-function _cs(k,v){_MC.set(k,{v,t:Date.now()});if(_MC.size>30){_MC.delete(_MC.keys().next().value);}}
+function _cs(k,v){_MC.set(k,{v,t:Date.now()});if(_MC.size>=30){_MC.delete(_MC.keys().next().value);}}
 /* ── CURRENT WORLD FACTS — keeps Groq (Jan 2024 cutoff) generating accurate content ── */
 /* WF block removed — Tavily now fetches all current facts dynamically.
    No hardcoding needed. Groq receives real web search results as context. */
@@ -964,7 +964,7 @@ NOTHING on this Platform constitutes professional financial, investment, legal o
 World Intel, its owner Shubham Chatterjee, and affiliates shall NOT be liable for any investment losses, financial decisions, or damages made based on information shown on this Platform. You use this Platform entirely at your own risk.
 
 4. AI-GENERATED CONTENT
-The Platform uses Anthropic Claude AI to search and synthesize market and news data. AI analysis carries inherent uncertainty. Signals like BUY/SELL are AI-generated interpretations — NOT professional financial recommendations.
+The Platform uses Groq AI (Llama 3 models) to search and synthesize market and news data. AI analysis carries inherent uncertainty. Signals like BUY/SELL are AI-generated interpretations — NOT professional financial recommendations.
 
 5. FINTECH CAPABILITIES NOTICE
 Market data, investment analysis, and financial signals are generated using AI tools. These are analytical tools only and do not constitute a regulated financial service.
@@ -1114,6 +1114,9 @@ body{font-family:'Inter',sans-serif;color:${T.text};font-size:15px;line-height:1
     width:190px!important;
   }
 }
+/* Forecast 4-stat grid: 4 columns on desktop, 2x2 on mobile */
+.fc-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;}
+@media(max-width:640px){.fc-stats{grid-template-columns:repeat(2,1fr);gap:7px;}}
 `;}
 
 /* ═══════════════════════════════════════════════════════════
@@ -1150,8 +1153,8 @@ function Loader({c,n=3,sz=5}){return <span style={{display:"inline-flex",gap:4,a
 function SkRow({h=56,mb=6}){return <div className="sk" style={{height:h,marginBottom:mb}}/>;}
 function SignalBadge({sig}){const s=(sig||"HOLD").toUpperCase();const cl=s==="STRONG BUY"?"signal-sbuy":s==="BUY"?"signal-buy":s==="HOLD"?"signal-hold":s==="SELL"?"signal-sell":"signal-ssell";return <span className={`tag ${cl}`}>{s}</span>;}
 function ChangeChip({v,prefix="",T}){if(!v||v==="N/A")return <span style={{color:T.textDD,fontSize:12}}>—</span>;const n=parseFloat(v);if(isNaN(n))return <span style={{color:T.textDD,fontSize:12}}>—</span>;const up=n>0;const zero=n===0||Object.is(n,-0);return <span style={{color:zero?T.textD:up?T.green:T.red,fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700}}>{zero?"→":up?"▲":"▼"} {prefix}{v.replace(/[+-]/g,"")}</span>;}
-function ScoreBar({val=0,color,T}){return <div style={{height:4,background:T?`rgba(${val>50?"0,0,0":"0,0,0"}`:"rgba(255,255,255,0.06)",borderRadius:2,overflow:"hidden",marginTop:4,backgroundColor:"rgba(128,128,128,0.12)"}}><div style={{width:`${Math.min(100,Math.max(0,val))}%`,height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div>;}
-function InfoCard({label,value,color,sub,T}){return <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:6}}>{label}</div><div style={{fontSize:18,fontWeight:700,color}}>{value||"—"}</div>{sub&&<div style={{marginTop:4}}>{sub}</div>}</div>;}
+function ScoreBar({val=0,color,T}){return <div style={{height:4,borderRadius:2,overflow:"hidden",marginTop:4,backgroundColor:"rgba(128,128,128,0.12)"}}><div style={{width:`${Math.min(100,Math.max(0,val))}%`,height:"100%",background:color,borderRadius:2,transition:"width 1s ease"}}/></div>;}
+function InfoCard({label,value,color,sub,T}){return <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".1em",marginBottom:6,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div><div style={{fontSize:18,fontWeight:700,color}}>{value||"—"}</div>{sub&&<div style={{marginTop:4}}>{sub}</div>}</div>;}
 
 /* ── SEV META ── */
 function getSevC(T){return{
@@ -1224,9 +1227,9 @@ function AsyncBlock({loadFn,color,skCount=4,successCheck,children,T}){
 }
 
 /* ─ TERMS MODAL ─ */
-function TermsModal({onClose,T}){
+function TermsModal({onClose,T,zIndex=900}){
   return(
-    <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+    <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{zIndex}}>
       <div className="modal">
         <div style={{padding:"18px 22px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
@@ -1264,7 +1267,7 @@ function ContactModal({onClose,T}){
   const[showTerms,setShowTerms]=useState(false);
   return(
     <>
-    {showTerms&&<TermsModal onClose={()=>setShowTerms(false)} T={T}/>}
+    {showTerms&&<TermsModal onClose={()=>setShowTerms(false)} T={T} zIndex={950}/>}
     <div className="modal-bg" onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
       <div className="modal" style={{maxWidth:480}}>
         <div style={{padding:"18px 22px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1913,9 +1916,9 @@ function PageForecast({country,setCountry,T}){
                     <InfoCard key={l} label={l} T={T} color={scoreC(v||50)} value={<><span style={{fontSize:26,fontWeight:900}}>{v||"—"}</span><span style={{fontSize:14,color:T.textDD}}>/100</span></>} sub={<ScoreBar val={v} color={scoreC(v||50)} T={T}/>}/>
                   ))}
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7}}>
+                <div className="fc-stats">
                   {[["GDP Growth",data.gdpGrowth,T.green],["Inflation",data.inflation,T.yellow],["Unemployment",data.unemployment,T.orange],["Interest Rate",data.interestRate,T.cyan]].map(([l,v,c])=>v!=null&&(
-                    <div key={l} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"11px 13px",textAlign:"center"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:5}}>{l}</div><div style={{fontSize:15,fontWeight:700,color:c,fontFamily:"'JetBrains Mono',monospace"}}>{v}</div></div>
+                    <div key={l} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,padding:"11px 13px",textAlign:"center",display:"flex",flexDirection:"column",justifyContent:"space-between"}}><div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",marginBottom:5,minHeight:22,display:"flex",alignItems:"flex-start",justifyContent:"center"}}>{l}</div><div style={{fontSize:15,fontWeight:700,color:c,fontFamily:"'JetBrains Mono',monospace"}}>{v}</div></div>
                   ))}
                 </div>
                 {[["📊 Economic Outlook",data.sixMonthPrediction,outC,data.economicOutlook?.toUpperCase()],["📈 Trader Opportunities",data.traderOpportunities,T.cyan,null],["👷 Working Class",data.workingClassForecast,T.green,null],["🏦 Market Direction",data.marketOutlook,T.purple,null]].map(([l,v,c,badge])=>v&&(
@@ -1987,6 +1990,9 @@ const ASSET_SYMBOLS = {
 // Browser cache for assets — 5 min TTL (prices change fast)
 const _assetCache = {data:null, t:0};
 const ASSET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+// Per-symbol last-known-good price cache — survives across refreshes
+// If Yahoo Finance is flaky for a symbol, we show last real price instead of "no data"
+const _symbolGoodPrice = new Map(); // symbol → {price, change1d_raw}
 
 async function fetchAssets() {
   // Check browser cache first
@@ -2013,7 +2019,14 @@ async function fetchAssets() {
     // Merge prices into asset definitions
     const merge = (list) => list.map(a => {
       const p = prices[a.symbol];
-      if (!p || !p.price || p.price <= 0) return {...a, price: null, change1d_raw: 0, isReal: false};
+      if (!p || !p.price || p.price <= 0) {
+        // Yahoo failed for this symbol — try last known good price instead of "no data"
+        const cached = _symbolGoodPrice.get(a.symbol);
+        if (cached) return {...a, price: cached.price, change1d_raw: cached.change1d_raw, isReal: true, isStale: true};
+        return {...a, price: null, change1d_raw: 0, isReal: false};
+      }
+      // Good price received — update the per-symbol cache
+      _symbolGoodPrice.set(a.symbol, {price: p.price, change1d_raw: p.change1d_raw || 0});
       return {
         ...a,
         price: p.price,
@@ -2260,12 +2273,24 @@ function PageChat({session,T}){
     inputRef.current?.focus();
   }
 
-  // Render message text with line break support — split once, not per-element
+  // Render message text — supports line breaks and **bold** markdown from ARIA
   function renderText(text){
     const lines=text.split("\n");
-    return lines.map((line,i)=>(
-      <span key={i}>{line}{i<lines.length-1&&<br/>}</span>
-    ));
+    return lines.map((line,i)=>{
+      // Parse **bold** inline — split by ** pairs
+      const parts=[];
+      const segments=line.split("**");
+      segments.forEach((seg,si)=>{
+        if(!seg)return;
+        if(si%2===1){
+          // Odd index = inside ** ** = bold
+          parts.push(<strong key={si} style={{color:T.cyan,fontWeight:700}}>{seg}</strong>);
+        }else{
+          parts.push(<span key={si}>{seg}</span>);
+        }
+      });
+      return(<span key={i}>{parts}{i<lines.length-1&&<br/>}</span>);
+    });
   }
 
   return(
@@ -2512,7 +2537,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
                 {/* Click-away overlay */}
                 <div onClick={()=>setShowSettings(false)} style={{position:"fixed",inset:0,zIndex:149}}/>
                 <div style={{
-                  position:"absolute",top:"calc(100% + 8px)",right:0,
+                  position:"fixed",top:56,right:8,
                   background:isDarkMode?"rgba(6,10,18,0.97)":"rgba(255,255,255,0.97)",
                   border:`1px solid ${T.border}`,borderRadius:12,
                   padding:"10px 0",width:210,zIndex:300,

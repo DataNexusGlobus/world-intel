@@ -55,7 +55,7 @@ export default async function handler(req) {
         },
         body: JSON.stringify({
           text: truncated,
-          model_id: 'eleven_turbo_v2_5', // fastest + best quality on free tier
+          model_id: 'eleven_multilingual_v2', // fastest + best quality on free tier
           voice_settings: {
             stability: 0.4,         // expressive, not flat
             similarity_boost: 0.8,

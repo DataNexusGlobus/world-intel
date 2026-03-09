@@ -2381,12 +2381,16 @@ function PageChat({session,T,isDark}){
           });
           return;
         }
-        // 401 = bad key — permanently disable HF for this session
+        // 401 = bad key — permanently disable for session
         if(res.status===401){
           if(mounted.current)setHfVoiceOk(false);
         }
-        // 503 = cold start timeout or network — fall through to browser THIS time only
-        // hfVoiceOk stays true so next message tries HF again
+        // 429 = quota exceeded — disable for session, show friendly note in console
+        if(res.status===429){
+          if(mounted.current)setHfVoiceOk(false);
+          console.info("ARIA voice: ElevenLabs quota reached. Resets monthly.");
+        }
+        // 503 = network/timeout — fall through THIS time only, retry next message
       }catch{
         // Network/timeout error — fall through silently, retry next message
       }
@@ -2557,9 +2561,9 @@ function PageChat({session,T,isDark}){
           {(
             <button
               onClick={()=>{if(speaking)stopSpeaking();setVoiceOut(v=>!v);}}
-              title={voiceOut?(hfVoiceOk?"HuggingFace voice on — click to mute":"Browser TTS active"):"Voice off — click to enable"}
+              title={voiceOut?(hfVoiceOk?"ElevenLabs voice on — click to mute":"Browser TTS active"):"Voice off — click to enable"}
               style={{background:voiceOut?`${isDark?"rgba(0,220,130,.1)":"rgba(0,160,90,.1)"}`:`${isDark?"rgba(255,58,90,.08)":"rgba(200,40,60,.08)"}`,border:`1px solid ${voiceOut?T.green+"44":T.red+"44"}`,borderRadius:7,padding:"5px 9px",cursor:"pointer",color:voiceOut?T.green:T.textDD,fontSize:13,display:"flex",alignItems:"center",gap:4}}>
-              {speaking?"🔊":(voiceOut?(hfVoiceOk?"🎙 HF":"🔈"):"🔇")}
+              {speaking?"🔊":(voiceOut?(hfVoiceOk?"🎙 EL":"🔈"):"🔇")}
             </button>
           )}
           <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"4px 9px",fontSize:11}}>🗑</button>
@@ -2690,7 +2694,7 @@ function PageChat({session,T,isDark}){
 
         <div style={{marginTop:8,fontSize:10,color:T.textDD,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",display:"flex",justifyContent:"center",alignItems:"center",gap:14}}>
           {voiceSupported&&<span>🎙 voice input supported</span>}
-          <span>{voiceOut?(hfVoiceOk?"🎙 HF voice":"🔈 browser voice"):"🔇 voice off"}</span>
+          <span>{voiceOut?(hfVoiceOk?"🎙 EL voice":"🔈 browser voice"):"🔇 voice off"}</span>
           {userProfile?.country&&<span>🧠 memory active</span>}
         </div>
       </div>

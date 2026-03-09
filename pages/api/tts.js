@@ -1,9 +1,8 @@
 // pages/api/tts.js — ElevenLabs TTS proxy
-// Voice: Aria (warm, conversational, natural — closest to Sol)
-// Free tier: 10,000 chars/month, no credit card needed
+// Voice: Aria — warm, natural, conversational
 export const config = { runtime: 'edge' };
 
-const VOICE_ID = '9BWtsMINqrJLrRacOk9x'; // "Aria" — warm, natural, conversational
+const VOICE_ID = '9BWtsMINqrJLrRacOk9x'; // Aria
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
@@ -36,7 +35,6 @@ export default async function handler(req) {
     });
   }
 
-  // 400 char limit to protect free quota (ARIA messages avg ~200 chars anyway)
   const truncated = text.slice(0, 400);
 
   const ctrl = new AbortController();
@@ -44,7 +42,7 @@ export default async function handler(req) {
 
   try {
     const res = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`,
       {
         method: 'POST',
         signal: ctrl.signal,
@@ -55,11 +53,11 @@ export default async function handler(req) {
         },
         body: JSON.stringify({
           text: truncated,
-          model_id: 'eleven_multilingual_v2', // fastest + best quality on free tier
+          model_id: 'eleven_flash_v2_5',
           voice_settings: {
-            stability: 0.4,         // expressive, not flat
-            similarity_boost: 0.8,
-            style: 0.35,            // adds personality
+            stability: 0.35,
+            similarity_boost: 0.75,
+            style: 0.40,
             use_speaker_boost: true,
           },
         }),
@@ -68,23 +66,24 @@ export default async function handler(req) {
     clearTimeout(timer);
 
     if (res.ok) {
-      return new Response(res.body, {
+      // Read full audio into buffer — avoids streaming corruption on edge runtime
+      const audioBuffer = await res.arrayBuffer();
+      return new Response(audioBuffer, {
         status: 200,
         headers: {
           'Content-Type': 'audio/mpeg',
           'Cache-Control': 'no-store',
+          'Content-Length': audioBuffer.byteLength.toString(),
         },
       });
     }
 
-    // 401 = bad key
     if (res.status === 401) {
       return new Response(JSON.stringify({ error: 'bad_key' }), {
         status: 401, headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // 429 = quota exceeded
     if (res.status === 429) {
       return new Response(JSON.stringify({ error: 'quota_exceeded' }), {
         status: 429, headers: { 'Content-Type': 'application/json' },

@@ -1,7 +1,5 @@
 // pages/api/tts.js — HuggingFace TTS proxy
-// Uses facebook/mms-tts-eng model — free, no credit card, no quota limits
-// Server-side edge function — zero webpack issues
-// Needs: HUGGINGFACE_API_KEY env var in Vercel
+// Model: facebook/mms-tts-eng — free, no quota, no credit card ever
 export const config = { runtime: 'edge' };
 
 export default async function handler(req) {
@@ -13,8 +11,7 @@ export default async function handler(req) {
 
   const hfKey = process.env.HUGGINGFACE_API_KEY;
   if (!hfKey) {
-    // Silent fail — frontend falls back to browser TTS
-    return new Response(JSON.stringify({ error: 'TTS not configured' }), {
+    return new Response(JSON.stringify({ error: 'not_configured' }), {
       status: 503, headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -36,51 +33,69 @@ export default async function handler(req) {
     });
   }
 
-  // HuggingFace free tier has a 500 char practical limit for fast response
   const truncated = text.slice(0, 500);
 
-  const ctrl = new AbortController();
-  // 20s timeout — HF cold starts can be slow when model is loading
-  const timer = setTimeout(() => ctrl.abort(), 20000);
-
-  try {
-    const res = await fetch(
-      'https://api-inference.huggingface.co/models/facebook/mms-tts-eng',
-      {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: {
-          'Authorization': `Bearer ${hfKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ inputs: truncated }),
-      }
-    );
-    clearTimeout(timer);
-
-    if (!res.ok) {
-      // 503 = model loading (cold start) — tell frontend to fallback
-      // 429 = rate limit — also fallback
-      return new Response(JSON.stringify({ error: `HF ${res.status}` }), {
-        status: 503,
-        headers: { 'Content-Type': 'application/json' },
-      });
+  // Try up to 3 times — HF free tier has cold starts that need a retry
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Wait before retry (not on first attempt)
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, 3000));
     }
 
-    // Stream audio bytes straight to client
-    // HF returns audio/flac — browser Audio element handles it fine
-    return new Response(res.body, {
-      status: 200,
-      headers: {
-        'Content-Type': res.headers.get('content-type') || 'audio/flac',
-        'Cache-Control': 'no-store',
-      },
-    });
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
 
-  } catch (err) {
-    clearTimeout(timer);
-    return new Response(JSON.stringify({
-      error: err?.name === 'AbortError' ? 'TTS timeout' : 'TTS failed',
-    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    try {
+      const res = await fetch(
+        'https://api-inference.huggingface.co/models/facebook/mms-tts-eng',
+        {
+          method: 'POST',
+          signal: ctrl.signal,
+          headers: {
+            'Authorization': `Bearer ${hfKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ inputs: truncated }),
+        }
+      );
+      clearTimeout(timer);
+
+      if (res.ok) {
+        // Success — stream audio back
+        return new Response(res.body, {
+          status: 200,
+          headers: {
+            'Content-Type': res.headers.get('content-type') || 'audio/flac',
+            'Cache-Control': 'no-store',
+          },
+        });
+      }
+
+      // 503 = model still loading — retry
+      if (res.status === 503 && attempt < 2) continue;
+
+      // 401 = bad key — no point retrying
+      if (res.status === 401) {
+        return new Response(JSON.stringify({ error: 'bad_key' }), {
+          status: 401, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Other errors — return with retryable flag
+      return new Response(JSON.stringify({ error: `HF ${res.status}` }), {
+        status: 503, headers: { 'Content-Type': 'application/json' },
+      });
+
+    } catch (err) {
+      clearTimeout(timer);
+      if (attempt < 2) continue; // retry on network error
+      return new Response(JSON.stringify({
+        error: err?.name === 'AbortError' ? 'timeout' : 'fetch_failed',
+      }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    }
   }
+
+  return new Response(JSON.stringify({ error: 'max_retries' }), {
+    status: 503, headers: { 'Content-Type': 'application/json' },
+  });
 }

@@ -2344,15 +2344,20 @@ function PageChat({session,T,isDark}){
     const cleaned=cleanForSpeech(text);
     if(!cleaned)return;
 
-    // Try HuggingFace TTS if not previously failed
+    // Try HuggingFace TTS if not permanently disabled (only disabled on 401 bad key)
     if(hfVoiceOk){
       try{
         setSpeaking(true);
+        // HF has cold starts — server retries up to 3x so give it 45s timeout
+        const ctrl=new AbortController();
+        const timer=setTimeout(()=>ctrl.abort(),45000);
         const res=await fetch("/api/tts",{
           method:"POST",
+          signal:ctrl,
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({text:cleaned}),
         });
+        clearTimeout(timer);
         if(res.ok){
           const blob=await res.blob();
           const url=URL.createObjectURL(blob);
@@ -2376,12 +2381,14 @@ function PageChat({session,T,isDark}){
           });
           return;
         }
-        // 503 = key missing or model cold starting — switch to browser for session
-        if(res.status===503){
+        // 401 = bad key — permanently disable HF for this session
+        if(res.status===401){
           if(mounted.current)setHfVoiceOk(false);
         }
+        // 503 = cold start timeout or network — fall through to browser THIS time only
+        // hfVoiceOk stays true so next message tries HF again
       }catch{
-        // Network error — fall through to browser silently
+        // Network/timeout error — fall through silently, retry next message
       }
       if(mounted.current)setSpeaking(false);
     }

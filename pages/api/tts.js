@@ -1,14 +1,9 @@
-// pages/api/tts.js — HuggingFace Parler-TTS proxy
-// Model: parler-tts/parler-tts-mini-v1
-// Natural, expressive, describable voice — free on HF, no credit card ever
+// pages/api/tts.js — ElevenLabs TTS proxy
+// Voice: Aria (warm, conversational, natural — closest to Sol)
+// Free tier: 10,000 chars/month, no credit card needed
 export const config = { runtime: 'edge' };
 
-// Voice description — controls how ARIA sounds
-// Parler-TTS reads this and generates accordingly
-const VOICE_DESCRIPTION =
-  "A young woman speaks warmly and naturally with a clear American English accent. " +
-  "Her voice is expressive, friendly, and conversational — like talking to a smart friend. " +
-  "Moderate pace, clear pronunciation, slightly upbeat tone.";
+const VOICE_ID = '9BWtsMINqrJLrRacOk9x'; // "Aria" — warm, natural, conversational
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
@@ -17,8 +12,8 @@ export default async function handler(req) {
     });
   }
 
-  const hfKey = process.env.HUGGINGFACE_API_KEY;
-  if (!hfKey) {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) {
     return new Response(JSON.stringify({ error: 'not_configured' }), {
       status: 503, headers: { 'Content-Type': 'application/json' },
     });
@@ -41,71 +36,69 @@ export default async function handler(req) {
     });
   }
 
-  // Parler works best with shorter chunks — 200 chars is the sweet spot
-  const truncated = text.slice(0, 200);
+  // 400 char limit to protect free quota (ARIA messages avg ~200 chars anyway)
+  const truncated = text.slice(0, 400);
 
-  // Retry up to 3 times — HF free tier has cold starts
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) {
-      await new Promise(r => setTimeout(r, 4000));
-    }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12000);
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
-
-    try {
-      const res = await fetch(
-        'https://api-inference.huggingface.co/models/parler-tts/parler-tts-mini-v1',
-        {
-          method: 'POST',
-          signal: ctrl.signal,
-          headers: {
-            'Authorization': `Bearer ${hfKey}`,
-            'Content-Type': 'application/json',
+  try {
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+      {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'xi-api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg',
+        },
+        body: JSON.stringify({
+          text: truncated,
+          model_id: 'eleven_turbo_v2_5', // fastest + best quality on free tier
+          voice_settings: {
+            stability: 0.4,         // expressive, not flat
+            similarity_boost: 0.8,
+            style: 0.35,            // adds personality
+            use_speaker_boost: true,
           },
-          body: JSON.stringify({
-            inputs: truncated,
-            parameters: {
-              description: VOICE_DESCRIPTION,
-            },
-          }),
-        }
-      );
-      clearTimeout(timer);
-
-      if (res.ok) {
-        return new Response(res.body, {
-          status: 200,
-          headers: {
-            'Content-Type': res.headers.get('content-type') || 'audio/wav',
-            'Cache-Control': 'no-store',
-          },
-        });
+        }),
       }
+    );
+    clearTimeout(timer);
 
-      if (res.status === 401) {
-        return new Response(JSON.stringify({ error: 'bad_key' }), {
-          status: 401, headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      // 503 = model loading — retry
-      if (res.status === 503 && attempt < 2) continue;
-
-      return new Response(JSON.stringify({ error: `HF ${res.status}` }), {
-        status: 503, headers: { 'Content-Type': 'application/json' },
+    if (res.ok) {
+      return new Response(res.body, {
+        status: 200,
+        headers: {
+          'Content-Type': 'audio/mpeg',
+          'Cache-Control': 'no-store',
+        },
       });
-
-    } catch (err) {
-      clearTimeout(timer);
-      if (attempt < 2) continue;
-      return new Response(JSON.stringify({
-        error: err?.name === 'AbortError' ? 'timeout' : 'fetch_failed',
-      }), { status: 503, headers: { 'Content-Type': 'application/json' } });
     }
-  }
 
-  return new Response(JSON.stringify({ error: 'max_retries' }), {
-    status: 503, headers: { 'Content-Type': 'application/json' },
-  });
+    // 401 = bad key
+    if (res.status === 401) {
+      return new Response(JSON.stringify({ error: 'bad_key' }), {
+        status: 401, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // 429 = quota exceeded
+    if (res.status === 429) {
+      return new Response(JSON.stringify({ error: 'quota_exceeded' }), {
+        status: 429, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(JSON.stringify({ error: `EL ${res.status}` }), {
+      status: 503, headers: { 'Content-Type': 'application/json' },
+    });
+
+  } catch (err) {
+    clearTimeout(timer);
+    return new Response(JSON.stringify({
+      error: err?.name === 'AbortError' ? 'timeout' : 'fetch_failed',
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  }
 }

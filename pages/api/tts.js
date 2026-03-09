@@ -1,51 +1,32 @@
 // pages/api/tts.js — ElevenLabs TTS proxy
+// Uses Node.js runtime (NOT Edge) — Edge runtime corrupts binary audio data
 // Voice: Aria — warm, natural, conversational
-export const config = { runtime: 'edge' };
+import https from 'https';
 
 const VOICE_ID = '9BWtsMINqrJLrRacOk9x'; // Aria
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405, headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'not_configured' }), {
-      status: 503, headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(503).json({ error: 'not_configured' });
   }
 
-  let text;
-  try {
-    const raw = await req.json();
-    if (!raw || typeof raw !== 'object') throw new Error('bad body');
-    text = typeof raw.text === 'string' ? raw.text.trim() : '';
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid body' }), {
-      status: 400, headers: { 'Content-Type': 'application/json' },
-    });
+  const { text } = req.body;
+  if (!text || typeof text !== 'string' || !text.trim()) {
+    return res.status(400).json({ error: 'text required' });
   }
 
-  if (!text) {
-    return new Response(JSON.stringify({ error: 'text required' }), {
-      status: 400, headers: { 'Content-Type': 'application/json' },
-    });
-  }
-
-  const truncated = text.slice(0, 400);
-
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12000);
+  const truncated = text.trim().slice(0, 400);
 
   try {
-    const res = await fetch(
+    const elRes = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`,
       {
         method: 'POST',
-        signal: ctrl.signal,
         headers: {
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
@@ -53,7 +34,7 @@ export default async function handler(req) {
         },
         body: JSON.stringify({
           text: truncated,
-          model_id: 'eleven_flash_v2_5',
+          model_id: 'eleven_multilingual_v2',
           voice_settings: {
             stability: 0.35,
             similarity_boost: 0.75,
@@ -63,41 +44,23 @@ export default async function handler(req) {
         }),
       }
     );
-    clearTimeout(timer);
 
-    if (res.ok) {
-      // Read full audio into buffer — avoids streaming corruption on edge runtime
-      const audioBuffer = await res.arrayBuffer();
-      return new Response(audioBuffer, {
-        status: 200,
-        headers: {
-          'Content-Type': 'audio/mpeg',
-          'Cache-Control': 'no-store',
-          'Content-Length': audioBuffer.byteLength.toString(),
-        },
-      });
+    if (!elRes.ok) {
+      if (elRes.status === 401) return res.status(401).json({ error: 'bad_key' });
+      if (elRes.status === 429) return res.status(429).json({ error: 'quota_exceeded' });
+      return res.status(503).json({ error: `EL ${elRes.status}` });
     }
 
-    if (res.status === 401) {
-      return new Response(JSON.stringify({ error: 'bad_key' }), {
-        status: 401, headers: { 'Content-Type': 'application/json' },
-      });
-    }
+    // Get audio as buffer and send cleanly — no streaming corruption
+    const arrayBuffer = await elRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
 
-    if (res.status === 429) {
-      return new Response(JSON.stringify({ error: 'quota_exceeded' }), {
-        status: 429, headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    return new Response(JSON.stringify({ error: `EL ${res.status}` }), {
-      status: 503, headers: { 'Content-Type': 'application/json' },
-    });
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(200).send(buffer);
 
   } catch (err) {
-    clearTimeout(timer);
-    return new Response(JSON.stringify({
-      error: err?.name === 'AbortError' ? 'timeout' : 'fetch_failed',
-    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+    return res.status(503).json({ error: 'fetch_failed' });
   }
 }

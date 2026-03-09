@@ -1,6 +1,14 @@
-// pages/api/tts.js — HuggingFace TTS proxy
-// Model: facebook/mms-tts-eng — free, no quota, no credit card ever
+// pages/api/tts.js — HuggingFace Parler-TTS proxy
+// Model: parler-tts/parler-tts-mini-v1
+// Natural, expressive, describable voice — free on HF, no credit card ever
 export const config = { runtime: 'edge' };
+
+// Voice description — controls how ARIA sounds
+// Parler-TTS reads this and generates accordingly
+const VOICE_DESCRIPTION =
+  "A young woman speaks warmly and naturally with a clear American English accent. " +
+  "Her voice is expressive, friendly, and conversational — like talking to a smart friend. " +
+  "Moderate pace, clear pronunciation, slightly upbeat tone.";
 
 export default async function handler(req) {
   if (req.method !== 'POST') {
@@ -33,13 +41,13 @@ export default async function handler(req) {
     });
   }
 
-  const truncated = text.slice(0, 500);
+  // Parler works best with shorter chunks — 200 chars is the sweet spot
+  const truncated = text.slice(0, 200);
 
-  // Try up to 3 times — HF free tier has cold starts that need a retry
+  // Retry up to 3 times — HF free tier has cold starts
   for (let attempt = 0; attempt < 3; attempt++) {
-    // Wait before retry (not on first attempt)
     if (attempt > 0) {
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 4000));
     }
 
     const ctrl = new AbortController();
@@ -47,7 +55,7 @@ export default async function handler(req) {
 
     try {
       const res = await fetch(
-        'https://api-inference.huggingface.co/models/facebook/mms-tts-eng',
+        'https://api-inference.huggingface.co/models/parler-tts/parler-tts-mini-v1',
         {
           method: 'POST',
           signal: ctrl.signal,
@@ -55,40 +63,42 @@ export default async function handler(req) {
             'Authorization': `Bearer ${hfKey}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ inputs: truncated }),
+          body: JSON.stringify({
+            inputs: truncated,
+            parameters: {
+              description: VOICE_DESCRIPTION,
+            },
+          }),
         }
       );
       clearTimeout(timer);
 
       if (res.ok) {
-        // Success — stream audio back
         return new Response(res.body, {
           status: 200,
           headers: {
-            'Content-Type': res.headers.get('content-type') || 'audio/flac',
+            'Content-Type': res.headers.get('content-type') || 'audio/wav',
             'Cache-Control': 'no-store',
           },
         });
       }
 
-      // 503 = model still loading — retry
-      if (res.status === 503 && attempt < 2) continue;
-
-      // 401 = bad key — no point retrying
       if (res.status === 401) {
         return new Response(JSON.stringify({ error: 'bad_key' }), {
           status: 401, headers: { 'Content-Type': 'application/json' },
         });
       }
 
-      // Other errors — return with retryable flag
+      // 503 = model loading — retry
+      if (res.status === 503 && attempt < 2) continue;
+
       return new Response(JSON.stringify({ error: `HF ${res.status}` }), {
         status: 503, headers: { 'Content-Type': 'application/json' },
       });
 
     } catch (err) {
       clearTimeout(timer);
-      if (attempt < 2) continue; // retry on network error
+      if (attempt < 2) continue;
       return new Response(JSON.stringify({
         error: err?.name === 'AbortError' ? 'timeout' : 'fetch_failed',
       }), { status: 503, headers: { 'Content-Type': 'application/json' } });

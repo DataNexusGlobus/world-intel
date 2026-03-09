@@ -1,17 +1,37 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: false,
+  experimental: {
+    esmExternals: 'loose',
+  },
   webpack: (config, { isServer }) => {
-    config.experiments = { ...config.experiments, asyncWebAssembly: true };
-    // Don't try to bundle kokoro-js on the server side
+    config.experiments = {
+      ...config.experiments,
+      asyncWebAssembly: true,
+      layers: true,
+    };
+
+    // Keep kokoro-js out of server bundle completely
     if (isServer) {
-      config.externals = [...(config.externals || []), 'kokoro-js'];
+      config.externals = [
+        ...(config.externals || []),
+        'kokoro-js',
+        'onnxruntime-web',
+      ];
     }
-    // Handle WebGPU shader files inside kokoro-js
-    config.module.rules.push({
+
+    // WGSL shader files — put first so it runs before default rules
+    config.module.rules.unshift({
       test: /\.wgsl$/i,
       type: 'asset/source',
     });
+
+    // WASM files
+    config.module.rules.push({
+      test: /\.wasm$/,
+      type: 'webassembly/async',
+    });
+
     return config;
   },
 };

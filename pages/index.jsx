@@ -2216,35 +2216,194 @@ function PageAssets({T}) {
 
 /* ═══════════════════════════════════════════════════════════
    PAGE: ARIA — Personal AI Financial Advisor
+   Features: Voice I/O · Cross-session memory · Phase tracking
 ═══════════════════════════════════════════════════════════ */
-function PageChat({session,T}){
+function PageChat({session,T,isDark}){
   const[messages,setMessages]=useState([]);
   const[input,setInput]=useState("");
   const[loading,setLoad]=useState(false);
+  const[phase,setPhase]=useState("onboarding"); // onboarding | roadmap | deepdive
+  const[userProfile,setUserProfile]=useState(null); // cross-session memory
+  const[profileLoaded,setProfileLoaded]=useState(false);
+  // Voice input
+  const[listening,setListening]=useState(false);
+  const[voiceSupported,setVoiceSupported]=useState(false);
+  const recognitionRef=useRef(null);
+  // Voice output
+  const[speaking,setSpeaking]=useState(false);
+  const[voiceOut,setVoiceOut]=useState(true); // user can toggle
+  const[ttsSupported,setTtsSupported]=useState(false);
+  const currentUtterRef=useRef(null);
   const bottomRef=useRef(null);
   const inputRef=useRef(null);
   const mounted=useRef(true);
 
-  // ARIA greeting on mount
+  // ── DETECT BROWSER CAPABILITIES ──────────────────────────────────────────────
   useEffect(()=>{
     mounted.current=true;
-    const greeting={
-      role:"assistant",
-      content:`Hey${session?.username?(" "+session.username):""}! I'm ARIA 👋 Tell me — what's the one financial goal on your mind right now? Could be anything — a MacBook, a bike, a trip, or just building savings.`,
-      id:Date.now(),
+    // Speech Recognition
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(SR){
+      setVoiceSupported(true);
+      const r=new SR();
+      r.lang="en-IN"; // works globally, biased toward Indian English accent which is common for users
+      r.continuous=false;
+      r.interimResults=false;
+      r.onresult=(e)=>{
+        const transcript=Array.from(e.results).map(res=>res[0].transcript).join("").trim();
+        if(transcript){setInput(transcript);}
+        setListening(false);
+      };
+      r.onerror=()=>setListening(false);
+      r.onend=()=>setListening(false);
+      recognitionRef.current=r;
+    }
+    // Speech Synthesis
+    if(window.speechSynthesis){
+      setTtsSupported(true);
+    }
+    return()=>{
+      mounted.current=false;
+      window.speechSynthesis?.cancel();
     };
-    setMessages([greeting]);
-    return()=>{mounted.current=false;};
   },[]);
 
-  // Auto-scroll to bottom on new messages
+  // ── LOAD CROSS-SESSION MEMORY ─────────────────────────────────────────────────
+  useEffect(()=>{
+    if(!session?.id||profileLoaded)return;
+    fetch("/api/aria-profile",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"get",userId:session.id}),
+    }).then(r=>r.json()).then(d=>{
+      if(d?.profile&&mounted.current)setUserProfile(d.profile);
+    }).catch(()=>{}).finally(()=>{ if(mounted.current)setProfileLoaded(true); });
+  },[session?.id,profileLoaded]);
+
+  // ── GREETING (after profile loaded) ──────────────────────────────────────────
+  useEffect(()=>{
+    if(!profileLoaded)return;
+    const name=session?.username?""+session.username:"";
+    let greet;
+    if(userProfile?.goals_summary){
+      greet=`Hey${name?" "+name:""}! Welcome back 👋 Last time we were working on ${userProfile.goals_summary}. Want to pick up from there, or is there something new on your mind? 😊`;
+    }else{
+      greet=`Hey${name?" "+name:""}! I'm ARIA 👋 I'm your personal financial advisor — think of me as that one friend who actually knows this stuff. So tell me, what's the financial goal on your mind right now? Could be a new laptop, a trip, a bike, or just building a savings habit. Anything!`;
+    }
+    setMessages([{role:"assistant",content:greet,id:Date.now()}]);
+  },[profileLoaded]);
+
+  // ── AUTO SCROLL ───────────────────────────────────────────────────────────────
   useEffect(()=>{
     bottomRef.current?.scrollIntoView({behavior:"smooth"});
   },[messages,loading]);
 
+  // ── SPEAK (TTS) ───────────────────────────────────────────────────────────────
+  function speakText(text){
+    if(!ttsSupported||!voiceOut)return;
+    window.speechSynthesis.cancel();
+    // Clean text for speech — strip emojis, special chars, markdown remnants
+    const cleaned=text
+      .replace(/[*_#`~>]/g,"")
+      .replace(/[\u{1F300}-\u{1FFFF}]/gu," ")
+      .replace(/[\u{2600}-\u{26FF}]/gu," ")
+      .replace(/[\u{2700}-\u{27BF}]/gu," ")
+      .replace(/\s+/g," ").trim();
+    const utter=new SpeechSynthesisUtterance(cleaned);
+    utter.rate=1.05;
+    utter.pitch=1.1;
+    utter.volume=1;
+    // Prefer a female voice if available
+    const voices=window.speechSynthesis.getVoices();
+    const femaleVoice=voices.find(v=>
+      v.lang.startsWith("en")&&(
+        v.name.toLowerCase().includes("female")||
+        v.name.toLowerCase().includes("samantha")||
+        v.name.toLowerCase().includes("victoria")||
+        v.name.toLowerCase().includes("karen")||
+        v.name.toLowerCase().includes("moira")||
+        v.name.toLowerCase().includes("zira")||
+        v.name.toLowerCase().includes("aria")||
+        v.name.toLowerCase().includes("google uk english female")
+      )
+    );
+    if(femaleVoice)utter.voice=femaleVoice;
+    utter.onstart=()=>setSpeaking(true);
+    utter.onend=()=>setSpeaking(false);
+    utter.onerror=()=>setSpeaking(false);
+    currentUtterRef.current=utter;
+    window.speechSynthesis.speak(utter);
+  }
+
+  function stopSpeaking(){
+    window.speechSynthesis?.cancel();
+    setSpeaking(false);
+  }
+
+  // ── VOICE INPUT ───────────────────────────────────────────────────────────────
+  function toggleListening(){
+    if(!voiceSupported||!recognitionRef.current)return;
+    if(listening){
+      recognitionRef.current.stop();
+      setListening(false);
+    }else{
+      setInput("");
+      setListening(true);
+      try{recognitionRef.current.start();}catch{setListening(false);}
+    }
+  }
+
+  // ── DETECT PHASE FROM ARIA REPLY ─────────────────────────────────────────────
+  // Simple heuristic — if ARIA delivers a roadmap, switch phase
+  function detectPhase(reply){
+    const r=reply.toLowerCase();
+    const roadmapSignals=["here's your roadmap","your personalised roadmap","here is your roadmap","investment plan for you","monthly breakdown","per month into","₹ per month","put aside per month","invest per month","monthly investable","expected corpus"];
+    const deepdiveSignals=["exact fund","specific ticker","fund names","which platform","step by step","hdfc securities","zerodha kite","groww app","open the app","here are the specific"];
+    if(deepdiveSignals.some(s=>r.includes(s)))return "deepdive";
+    if(roadmapSignals.some(s=>r.includes(s)))return "roadmap";
+    return null; // no change
+  }
+
+  // ── EXTRACT PROFILE DATA FROM CONVERSATION ────────────────────────────────────
+  // Lightweight — just extracts country, age, income hints from the running chat
+  function extractProfileFromChat(allMessages){
+    const text=allMessages.map(m=>m.content).join(" ").toLowerCase();
+    const update={};
+    // Country
+    const countryMap=[["india","India"],["usa","USA"],["united states","USA"],["america","USA"],["uk","UK"],["united kingdom","UK"],["uae","UAE"],["dubai","UAE"],["singapore","Singapore"],["australia","Australia"],["canada","Canada"]];
+    for(const[k,v]of countryMap){if(text.includes(k)){update.country=v;break;}}
+    // Age hints
+    const ageM=text.match(/i(?:'m| am) (\d{1,2})(?: years old)?/);
+    if(ageM)update.age=ageM[1];
+    // Income hints
+    if(text.includes("₹"))update.income_range="INR mentioned";
+    if(text.includes("lakh"))update.income_range="INR mentioned";
+    // Goal summary — first user message usually has the goal
+    const firstUser=allMessages.find(m=>m.role==="user");
+    if(firstUser)update.goals_summary=firstUser.content.slice(0,120);
+    return update;
+  }
+
+  // ── SAVE PROFILE TO SUPABASE (debounced, every 5 messages) ───────────────────
+  function maybeSaveProfile(allMessages){
+    if(!session?.id||allMessages.length<5)return;
+    if(allMessages.length%5!==0)return; // only every 5 messages
+    const extracted=extractProfileFromChat(allMessages);
+    if(Object.keys(extracted).length===0)return;
+    const merged={...(userProfile||{}),...extracted};
+    setUserProfile(merged);
+    fetch("/api/aria-profile",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"save",userId:session.id,profileData:merged}),
+    }).catch(()=>{});
+  }
+
+  // ── SEND MESSAGE ──────────────────────────────────────────────────────────────
   async function sendMessage(){
     const text=input.trim();
     if(!text||loading)return;
+    if(speaking)stopSpeaking();
 
     const userMsg={role:"user",content:text,id:Date.now()};
     const newMessages=[...messages,userMsg];
@@ -2254,19 +2413,25 @@ function PageChat({session,T}){
 
     try{
       const today=new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"});
-      // Send history without the greeting's extra fields — just role+content
       const history=newMessages.slice(0,-1).map(m=>({role:m.role,content:m.content}));
-
       const res=await fetch("/api/chat",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:text,history,today}),
+        body:JSON.stringify({message:text,history,today,phase,userProfile}),
       });
       const data=await res.json();
       if(!mounted.current)return;
-
-      const reply=data.reply||"Hmm, something went wrong yaar. Try again! 😊";
-      setMessages(prev=>[...prev,{role:"assistant",content:reply,id:Date.now()}]);
+      const reply=data.reply||"Hmm something went wrong yaar. Try again! 😊";
+      const replyMsg={role:"assistant",content:reply,id:Date.now()};
+      const finalMessages=[...newMessages,replyMsg];
+      setMessages(finalMessages);
+      // Update phase based on reply content
+      const newPhase=detectPhase(reply);
+      if(newPhase)setPhase(newPhase);
+      // Speak the reply
+      speakText(reply);
+      // Maybe save profile
+      maybeSaveProfile(finalMessages);
     }catch{
       if(!mounted.current)return;
       setMessages(prev=>[...prev,{role:"assistant",content:"Network error yaar 😅 Check your connection and try again!",id:Date.now()}]);
@@ -2275,136 +2440,190 @@ function PageChat({session,T}){
   }
 
   function clearChat(){
-    const greeting={
-      role:"assistant",
-      content:`Hey${session?.username?(" "+session.username):""}! I'm ARIA 👋 Tell me — what's the one financial goal on your mind right now? Could be anything — a MacBook, a bike, a trip, or just building savings.`,
-      id:Date.now(),
-    };
-    setMessages([greeting]);
+    if(speaking)stopSpeaking();
+    const name=session?.username?" "+session.username:"";
+    setMessages([{role:"assistant",content:`Hey${name}! I'm ARIA 👋 New chat, fresh start! What financial goal are we working on today? 😊`,id:Date.now()}]);
     setInput("");
+    setPhase("onboarding");
     inputRef.current?.focus();
   }
 
-  // Render message text — supports line breaks and **bold** markdown from ARIA
+  // ── RENDER TEXT (supports newlines only — ARIA sends plain text now) ──────────
   function renderText(text){
-    const lines=text.split("\n");
-    return lines.map((line,i)=>{
-      // Parse **bold** inline — split by ** pairs
-      const parts=[];
-      const segments=line.split("**");
-      segments.forEach((seg,si)=>{
-        if(!seg)return;
-        if(si%2===1){
-          // Odd index = inside ** ** = bold
-          parts.push(<strong key={si} style={{color:T.cyan,fontWeight:700}}>{seg}</strong>);
-        }else{
-          parts.push(<span key={si}>{seg}</span>);
-        }
-      });
-      return(<span key={i}>{parts}{i<lines.length-1&&<br/>}</span>);
-    });
+    return text.split("\n").map((line,i,arr)=>(
+      <span key={i}>{line}{i<arr.length-1&&<br/>}</span>
+    ));
   }
+
+  const phaseLabel={onboarding:"getting to know you",roadmap:"roadmap delivered",deepdive:"deep dive mode"};
+  const phaseC={onboarding:T.cyan,roadmap:T.green,deepdive:T.purple};
 
   return(
     <div className="page-enter" style={{display:"flex",flexDirection:"column",height:"100%",maxHeight:"100%"}}>
 
-      {/* Compact ARIA header — just title bar, no info card */}
+      {/* ── ARIA HEADER ── */}
       <div style={{padding:"10px 18px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,background:T.headerBg}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15}}>💬</div>
+        <div style={{display:"flex",alignItems:"center",gap:9}}>
+          <div style={{width:32,height:32,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,animation:"ariaGlow 2.5s ease infinite"}}>💬</div>
           <div>
-            <div style={{fontSize:13,fontWeight:700,color:T.cyan,fontFamily:"'Orbitron',monospace",letterSpacing:".05em",lineHeight:1.1}}>ARIA</div>
-            <div style={{fontSize:10,color:T.textDD,fontFamily:"'JetBrains Mono',monospace"}}>Personal AI Financial Advisor</div>
+            <div style={{fontSize:14,fontWeight:700,color:T.cyan,fontFamily:"'Orbitron',monospace",letterSpacing:".06em",lineHeight:1.1}}>ARIA</div>
+            <div style={{fontSize:9,color:T.textDD,fontFamily:"'JetBrains Mono',monospace",letterSpacing:".06em"}}>AI FINANCIAL ADVISOR</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:4}}>
+          <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:2}}>
             <Pulse c={T.green} s={5}/>
-            <span style={{fontSize:10,color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>LIVE</span>
+            <span style={{fontSize:9,color:T.green,fontFamily:"'JetBrains Mono',monospace"}}>LIVE</span>
           </div>
+          {/* Phase indicator */}
+          <span style={{marginLeft:6,padding:"2px 8px",borderRadius:4,fontSize:9,fontFamily:"'JetBrains Mono',monospace",background:`${phaseC[phase]}14`,color:phaseC[phase],border:`1px solid ${phaseC[phase]}30`}}>
+            {phaseLabel[phase]}
+          </span>
+          {/* Memory indicator */}
+          {userProfile?.country&&(
+            <span style={{padding:"2px 8px",borderRadius:4,fontSize:9,fontFamily:"'JetBrains Mono',monospace",background:"rgba(168,85,247,.1)",color:T.purple,border:"1px solid rgba(168,85,247,.2)"}}>
+              🧠 {userProfile.country}
+            </span>
+          )}
         </div>
-        <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"4px 8px",fontSize:11}}>🗑 Clear</button>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {/* Voice output toggle */}
+          {ttsSupported&&(
+            <button
+              onClick={()=>{if(speaking)stopSpeaking();setVoiceOut(v=>!v);}}
+              title={voiceOut?"Voice on — click to mute ARIA":"Voice off — click to enable"}
+              style={{background:voiceOut?`${isDark?"rgba(0,220,130,.1)":"rgba(0,160,90,.1)"}`:`${isDark?"rgba(255,58,90,.08)":"rgba(200,40,60,.08)"}`,border:`1px solid ${voiceOut?T.green+"44":T.red+"44"}`,borderRadius:7,padding:"5px 9px",cursor:"pointer",color:voiceOut?T.green:T.textDD,fontSize:13,display:"flex",alignItems:"center",gap:4}}>
+              {speaking?"🔊":(voiceOut?"🔈":"🔇")}
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"4px 9px",fontSize:11}}>🗑</button>
+        </div>
       </div>
 
-      {/* Messages area — info card is inside here so it scrolls away during chat */}
-      <div style={{flex:1,overflowY:"auto",padding:"18px 22px",display:"flex",flexDirection:"column",gap:12}}>
+      {/* ── MESSAGES ── */}
+      <div style={{flex:1,overflowY:"auto",padding:"18px 20px",display:"flex",flexDirection:"column",gap:10}}>
 
-        {/* Info card — scrolls away as chat grows, no longer sticky */}
-        <div style={{padding:"14px 18px",background:T.card,border:`1px solid ${T.cyan}22`,borderRadius:11,marginBottom:4,flexShrink:0}}>
-          <div style={{fontSize:13,fontWeight:700,color:T.cyan,marginBottom:6}}>🤖 Meet ARIA</div>
-          <div style={{fontSize:13,color:T.textD,lineHeight:1.7,marginBottom:8}}>
-            Your personal AI financial advisor powered by live market data. Tell ARIA your financial goal and she'll build your exact investment roadmap — stock names, amounts, platforms, timelines. Everything.
+        {/* Welcome info card — scrolls away once chat fills */}
+        <div style={{padding:"14px 17px",background:T.card,border:`1px solid ${T.cyan}22`,borderRadius:12,marginBottom:2,flexShrink:0}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.cyan,marginBottom:5}}>💬 Meet ARIA — your financial bestie</div>
+          <div style={{fontSize:13,color:T.textD,lineHeight:1.72,marginBottom:8}}>
+            Tell ARIA your financial goal and she'll build your exact investment roadmap — specific fund names, amounts, platforms, timelines. All live researched, all personalised.
           </div>
-          <div style={{fontSize:12,color:T.yellow,display:"flex",alignItems:"center",gap:6}}>
-            <span>✨</span>
-            <span>Most effective for <strong>short term goals</strong> — short term wins build lifelong wealth habits.</span>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {["💰 Save for a goal","📈 Which SIP to start","🏠 vs Rent decision","🇮🇳 Best FD rates","💸 Tax saving options","📱 How to start investing"].map(q=>(
+              <button key={q} onClick={()=>{setInput(q.slice(q.indexOf(' ')+1));inputRef.current?.focus();}}
+                style={{padding:"5px 11px",borderRadius:20,fontSize:11,border:`1px solid ${T.border}`,background:"transparent",color:T.textD,cursor:"pointer",transition:"all .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=T.cyan+"55";e.currentTarget.style.color=T.cyan;}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor=T.border;e.currentTarget.style.color=T.textD;}}>
+                {q}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* Messages */}
         {messages.map((msg)=>{
           const isARIA=msg.role==="assistant";
           return(
-            <div key={msg.id} style={{display:"flex",justifyContent:isARIA?"flex-start":"flex-end",animation:"fadeIn .2s ease"}}>
+            <div key={msg.id} style={{display:"flex",justifyContent:isARIA?"flex-start":"flex-end",animation:"fadeIn .2s ease",alignItems:"flex-end",gap:7}}>
               {isARIA&&(
-                <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,marginRight:8,marginTop:2}}>💬</div>
+                <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>💬</div>
               )}
               <div style={{
-                maxWidth:"75%",
-                padding:"12px 16px",
-                borderRadius:isARIA?"4px 14px 14px 14px":"14px 4px 14px 14px",
+                maxWidth:"78%",
+                padding:"11px 15px",
+                borderRadius:isARIA?"3px 13px 13px 13px":"13px 3px 13px 13px",
                 background:isARIA
                   ?(isDark?"rgba(0,204,245,0.07)":"rgba(0,100,200,0.07)")
-                  :(isDark?"rgba(168,85,247,0.12)":"rgba(100,50,200,0.1)"),
-                border:`1px solid ${isARIA?T.cyan+"22":T.purple+"33"}`,
-                fontSize:14,
-                color:T.text,
-                lineHeight:1.75,
+                  :(isDark?"rgba(168,85,247,0.11)":"rgba(100,50,200,0.09)"),
+                border:`1px solid ${isARIA?T.cyan+"20":T.purple+"30"}`,
+                fontSize:14,color:T.text,lineHeight:1.75,
                 fontFamily:"'Inter',sans-serif",
               }}>
                 {renderText(msg.content)}
               </div>
+              {/* Replay TTS button on ARIA messages */}
+              {isARIA&&ttsSupported&&voiceOut&&(
+                <button onClick={()=>speakText(msg.content)} title="Replay voice"
+                  style={{background:"none",border:"none",cursor:"pointer",color:T.textDD,fontSize:12,padding:"2px",flexShrink:0,opacity:.5}}
+                  onMouseEnter={e=>e.currentTarget.style.opacity=1}
+                  onMouseLeave={e=>e.currentTarget.style.opacity=.5}>
+                  🔁
+                </button>
+              )}
             </div>
           );
         })}
 
-        {/* Typing indicator */}
+        {/* Typing dots */}
         {loading&&(
-          <div style={{display:"flex",justifyContent:"flex-start",animation:"fadeIn .2s"}}>
-            <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,marginRight:8}}>💬</div>
-            <div style={{padding:"14px 18px",borderRadius:"4px 14px 14px 14px",background:isDark?"rgba(0,204,245,0.07)":"rgba(0,100,200,0.07)",border:`1px solid ${T.cyan}22`,display:"flex",gap:5,alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"flex-end",gap:7,animation:"fadeIn .2s"}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:"rgba(0,204,245,0.12)",border:"1px solid rgba(0,204,245,0.25)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,flexShrink:0}}>💬</div>
+            <div style={{padding:"13px 17px",borderRadius:"3px 13px 13px 13px",background:isDark?"rgba(0,204,245,0.07)":"rgba(0,100,200,0.07)",border:`1px solid ${T.cyan}20`,display:"flex",gap:5,alignItems:"center"}}>
               {[0,1,2].map(i=>(
-                <span key={i} style={{width:7,height:7,borderRadius:"50%",background:T.cyan,display:"inline-block",animation:`ariaDotBounce 1.3s ${i*0.2}s infinite`}}/>
+                <span key={i} style={{width:7,height:7,borderRadius:"50%",background:T.cyan,display:"inline-block",animation:`ariaDotBounce 1.3s ${i*0.22}s infinite`}}/>
               ))}
             </div>
           </div>
         )}
+
+        {/* Speaking indicator */}
+        {speaking&&(
+          <div style={{textAlign:"center",fontSize:11,color:T.cyan,fontFamily:"'JetBrains Mono',monospace",display:"flex",alignItems:"center",justifyContent:"center",gap:6,opacity:.7}}>
+            <Pulse c={T.cyan} s={5}/>
+            ARIA is speaking… <button onClick={stopSpeaking} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:11,padding:0}}>■ stop</button>
+          </div>
+        )}
+
         <div ref={bottomRef}/>
       </div>
 
-      {/* Input area */}
-      <div style={{padding:"14px 22px",borderTop:`1px solid ${T.border}`,flexShrink:0,background:T.headerBg}}>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+      {/* ── INPUT BAR ── */}
+      <div style={{padding:"12px 20px",borderTop:`1px solid ${T.border}`,flexShrink:0,background:T.headerBg}}>
+        <div style={{display:"flex",gap:7,alignItems:"center"}}>
+
+          {/* Mic button */}
+          {voiceSupported&&(
+            <button
+              onClick={toggleListening}
+              title={listening?"Stop listening":"Speak to ARIA"}
+              style={{
+                width:40,height:40,borderRadius:"50%",flexShrink:0,cursor:"pointer",
+                border:`2px solid ${listening?T.red:T.border}`,
+                background:listening?`rgba(255,58,90,.12)`:"transparent",
+                color:listening?T.red:T.textDD,
+                fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",
+                transition:"all .2s",
+                animation:listening?"ariaGlow 1s ease infinite":"none",
+              }}>
+              {listening?"⏹":"🎙"}
+            </button>
+          )}
+
           <input
             ref={inputRef}
             className="input-field"
             value={input}
             onChange={e=>setInput(e.target.value)}
             onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
-            placeholder="Ask ARIA anything…"
+            placeholder={listening?"Listening… speak now 🎙":"Ask ARIA anything…"}
             disabled={loading}
-            style={{flex:1,border:`1px solid ${T.border}`,fontSize:14,padding:"11px 14px",borderRadius:10}}
-            maxLength={500}
+            style={{flex:1,border:`1px solid ${listening?T.red+"55":T.border}`,fontSize:14,padding:"11px 14px",borderRadius:10,transition:"border-color .2s"}}
+            maxLength={600}
           />
+
           <button
             className="btn btn-primary"
             onClick={sendMessage}
             disabled={loading||!input.trim()}
-            style={{padding:"11px 16px",fontSize:16,flexShrink:0,borderRadius:10}}
+            style={{padding:"11px 16px",fontSize:16,flexShrink:0,borderRadius:10,minWidth:44}}
             title="Send">
             {loading?<Loader c={T.cyan} n={3}/>:"➤"}
           </button>
         </div>
 
-        {/* Bottom note */}
-        <div style={{marginTop:10,fontSize:11,color:T.textDD,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",letterSpacing:".03em"}}>
-          📝 ARIA doesn't remember across sessions. Refreshing starts fresh.
+        <div style={{marginTop:8,fontSize:10,color:T.textDD,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",display:"flex",justifyContent:"center",alignItems:"center",gap:14}}>
+          {voiceSupported&&<span>🎙 voice input supported</span>}
+          {ttsSupported&&<span>{voiceOut?"🔈 voice on":"🔇 voice off"}</span>}
+          {userProfile?.country&&<span>🧠 memory active</span>}
         </div>
       </div>
     </div>
@@ -2707,7 +2926,7 @@ function Dashboard({session,onLogout,T,isDarkMode,onToggleTheme}){
             {page==="forecast"&&<PageForecast key={`forecast-${country}`} country={country} setCountry={c=>{setCountry(c);setSearch(c);}} T={T}/>}
             {/* PageChat always mounted — display:none preserves chat history when switching tabs */}
             <div style={{display:page==="aria"?"flex":"none",flex:1,flexDirection:"column",height:"100%",minHeight:0}}>
-              <PageChat session={session} T={T}/>
+              <PageChat session={session} T={T} isDark={isDarkMode}/>
             </div>
           </main>
         </div>

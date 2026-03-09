@@ -2229,11 +2229,15 @@ function PageChat({session,T,isDark}){
   const[listening,setListening]=useState(false);
   const[voiceSupported,setVoiceSupported]=useState(false);
   const recognitionRef=useRef(null);
-  // Voice output
+  // Voice output — Kokoro TTS (in-browser ONNX) + browser emergency fallback
   const[speaking,setSpeaking]=useState(false);
-  const[voiceOut,setVoiceOut]=useState(true); // user can toggle
-  const[ttsSupported,setTtsSupported]=useState(false);
-  const currentUtterRef=useRef(null);
+  const[voiceOut,setVoiceOut]=useState(true);
+  const[kokoroReady,setKokoroReady]=useState(false);   // true once model loaded
+  const[kokoroLoading,setKokoroLoading]=useState(false); // true during first download
+  const kokoroRef=useRef(null);         // KokoroTTS instance
+  const kokoroLoadingRef=useRef(false); // prevents double-init race
+  const currentAudioRef=useRef(null);   // Audio element for WAV playback
+  const currentUtterRef=useRef(null);   // SpeechSynthesis emergency fallback
   const bottomRef=useRef(null);
   const inputRef=useRef(null);
   const mounted=useRef(true);
@@ -2259,12 +2263,14 @@ function PageChat({session,T,isDark}){
       recognitionRef.current=r;
     }
     // Speech Synthesis
-    if(window.speechSynthesis){
-      setTtsSupported(true);
-    }
+    // Kokoro uses Web Audio / Audio element — no capability check needed
+    // Browser SpeechSynthesis available as emergency fallback only
     return()=>{
       mounted.current=false;
       window.speechSynthesis?.cancel();
+      try{
+        if(currentAudioRef.current){currentAudioRef.current.pause();currentAudioRef.current=null;}
+      }catch{}
     };
   },[]);
 
@@ -2298,22 +2304,41 @@ function PageChat({session,T,isDark}){
     bottomRef.current?.scrollIntoView({behavior:"smooth"});
   },[messages,loading]);
 
-  // ── SPEAK (TTS) ───────────────────────────────────────────────────────────────
-  function speakText(text){
-    if(!ttsSupported||!voiceOut)return;
-    window.speechSynthesis.cancel();
-    // Clean text for speech — strip emojis, special chars, markdown remnants
-    const cleaned=text
+  // ── CLEAN TEXT FOR SPEECH ────────────────────────────────────────────────────
+  function cleanForSpeech(text){
+    return text
       .replace(/[*_#`~>]/g,"")
       .replace(/[\u{1F300}-\u{1FFFF}]/gu," ")
       .replace(/[\u{2600}-\u{26FF}]/gu," ")
       .replace(/[\u{2700}-\u{27BF}]/gu," ")
       .replace(/\s+/g," ").trim();
+  }
+
+  // ── FLOAT32 → WAV BLOB ───────────────────────────────────────────────────────
+  function float32ToWavBlob(samples,sampleRate){
+    const buf=new ArrayBuffer(44+samples.length*2);
+    const v=new DataView(buf);
+    const ws=(off,s)=>{for(let i=0;i<s.length;i++)v.setUint8(off+i,s.charCodeAt(i));};
+    ws(0,"RIFF"); v.setUint32(4,36+samples.length*2,true);
+    ws(8,"WAVE"); ws(12,"fmt ");
+    v.setUint32(16,16,true); v.setUint16(20,1,true);
+    v.setUint16(22,1,true);
+    v.setUint32(24,sampleRate,true); v.setUint32(28,sampleRate*2,true);
+    v.setUint16(32,2,true); v.setUint16(34,16,true);
+    ws(36,"data"); v.setUint32(40,samples.length*2,true);
+    for(let i=0;i<samples.length;i++){
+      const s=Math.max(-1,Math.min(1,samples[i]));
+      v.setInt16(44+i*2,s*0x7FFF,true);
+    }
+    return new Blob([buf],{type:"audio/wav"});
+  }
+
+  // ── BROWSER TTS EMERGENCY FALLBACK ───────────────────────────────────────────
+  function speakBrowser(cleaned){
+    if(!window.speechSynthesis)return;
+    window.speechSynthesis.cancel();
     const utter=new SpeechSynthesisUtterance(cleaned);
-    utter.rate=1.05;
-    utter.pitch=1.1;
-    utter.volume=1;
-    // Prefer a female voice if available
+    utter.rate=1.0; utter.pitch=1.05; utter.volume=1;
     const voices=window.speechSynthesis.getVoices();
     const femaleVoice=voices.find(v=>
       v.lang.startsWith("en")&&(
@@ -2323,7 +2348,6 @@ function PageChat({session,T,isDark}){
         v.name.toLowerCase().includes("karen")||
         v.name.toLowerCase().includes("moira")||
         v.name.toLowerCase().includes("zira")||
-        v.name.toLowerCase().includes("aria")||
         v.name.toLowerCase().includes("google uk english female")
       )
     );
@@ -2335,11 +2359,82 @@ function PageChat({session,T,isDark}){
     window.speechSynthesis.speak(utter);
   }
 
-  function stopSpeaking(){
-    window.speechSynthesis?.cancel();
-    setSpeaking(false);
+  // ── KOKORO LOADER ─────────────────────────────────────────────────────────────
+  // First call: ~82MB download from HuggingFace CDN, cached in browser IndexedDB.
+  // Every subsequent session loads from cache in ~2s.
+  async function initKokoro(){
+    if(kokoroRef.current)return kokoroRef.current;
+    if(kokoroLoadingRef.current)return null;
+    kokoroLoadingRef.current=true;
+    if(mounted.current)setKokoroLoading(true);
+    try{
+      const{KokoroTTS}=await import("kokoro-js");
+      const tts=await KokoroTTS.from_pretrained("onnx-community/Kokoro-82M-v1.0",{
+        dtype:"q8",
+      });
+      kokoroRef.current=tts;
+      if(mounted.current)setKokoroReady(true);
+      return tts;
+    }catch(e){
+      console.warn("Kokoro load failed:",e);
+      return null;
+    }finally{
+      kokoroLoadingRef.current=false;
+      if(mounted.current)setKokoroLoading(false);
+    }
   }
 
+  // ── SPEAK — Kokoro primary, browser fallback ──────────────────────────────────
+  async function speakText(text){
+    if(!voiceOut)return;
+    stopSpeaking();
+    const cleaned=cleanForSpeech(text);
+    if(!cleaned)return;
+    try{
+      const tts=await initKokoro();
+      if(tts){
+        if(mounted.current)setSpeaking(true);
+        const result=await tts.generate(cleaned.slice(0,500),{voice:"af_heart"});
+        if(!mounted.current)return;
+        const blob=float32ToWavBlob(result.audio,result.sampling_rate);
+        const url=URL.createObjectURL(blob);
+        const audioEl=new Audio(url);
+        currentAudioRef.current=audioEl;
+        audioEl.onended=()=>{
+          if(mounted.current)setSpeaking(false);
+          URL.revokeObjectURL(url);
+          currentAudioRef.current=null;
+        };
+        audioEl.onerror=()=>{
+          if(mounted.current)setSpeaking(false);
+          URL.revokeObjectURL(url);
+          currentAudioRef.current=null;
+          speakBrowser(cleaned);
+        };
+        audioEl.play().catch(()=>{
+          if(mounted.current)setSpeaking(false);
+          URL.revokeObjectURL(url);
+          currentAudioRef.current=null;
+        });
+        return;
+      }
+    }catch(err){
+      if(mounted.current)setSpeaking(false);
+      console.warn("Kokoro error:",err);
+    }
+    speakBrowser(cleaned);
+  }
+
+  function stopSpeaking(){
+    if(currentAudioRef.current){
+      try{currentAudioRef.current.pause();currentAudioRef.current.currentTime=0;}catch{}
+      currentAudioRef.current=null;
+    }
+    window.speechSynthesis?.cancel();
+    if(mounted.current)setSpeaking(false);
+  }
+
+  // ── VOICE INPUT ───────────────────────
   // ── VOICE INPUT ───────────────────────────────────────────────────────────────
   function toggleListening(){
     if(!voiceSupported||!recognitionRef.current)return;
@@ -2486,12 +2581,12 @@ function PageChat({session,T,isDark}){
         </div>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           {/* Voice output toggle */}
-          {ttsSupported&&(
+          {(
             <button
               onClick={()=>{if(speaking)stopSpeaking();setVoiceOut(v=>!v);}}
-              title={voiceOut?"Voice on — click to mute ARIA":"Voice off — click to enable"}
+              title={voiceOut?(kokoroReady?"Kokoro voice on — click to mute":"Browser TTS active"):"Voice off — click to enable"}
               style={{background:voiceOut?`${isDark?"rgba(0,220,130,.1)":"rgba(0,160,90,.1)"}`:`${isDark?"rgba(255,58,90,.08)":"rgba(200,40,60,.08)"}`,border:`1px solid ${voiceOut?T.green+"44":T.red+"44"}`,borderRadius:7,padding:"5px 9px",cursor:"pointer",color:voiceOut?T.green:T.textDD,fontSize:13,display:"flex",alignItems:"center",gap:4}}>
-              {speaking?"🔊":(voiceOut?"🔈":"🔇")}
+              {speaking?"🔊":(voiceOut?(kokoroReady?"🎙 Kokoro":kokoroLoading?"⏳":"🔈"):"🔇")}
             </button>
           )}
           <button className="btn btn-ghost" onClick={clearChat} title="Clear chat" style={{padding:"4px 9px",fontSize:11}}>🗑</button>
@@ -2541,7 +2636,7 @@ function PageChat({session,T,isDark}){
                 {renderText(msg.content)}
               </div>
               {/* Replay TTS button on ARIA messages */}
-              {isARIA&&ttsSupported&&voiceOut&&(
+              {isARIA&&voiceOut&&(
                 <button onClick={()=>speakText(msg.content)} title="Replay voice"
                   style={{background:"none",border:"none",cursor:"pointer",color:T.textDD,fontSize:12,padding:"2px",flexShrink:0,opacity:.5}}
                   onMouseEnter={e=>e.currentTarget.style.opacity=1}
@@ -2622,7 +2717,7 @@ function PageChat({session,T,isDark}){
 
         <div style={{marginTop:8,fontSize:10,color:T.textDD,textAlign:"center",fontFamily:"'JetBrains Mono',monospace",display:"flex",justifyContent:"center",alignItems:"center",gap:14}}>
           {voiceSupported&&<span>🎙 voice input supported</span>}
-          {ttsSupported&&<span>{voiceOut?"🔈 voice on":"🔇 voice off"}</span>}
+          <span>{voiceOut?(kokoroReady?"🎙 Kokoro voice":kokoroLoading?"⏳ loading voice model…":"🔈 browser voice"):"🔇 voice off"}</span>
           {userProfile?.country&&<span>🧠 memory active</span>}
         </div>
       </div>
